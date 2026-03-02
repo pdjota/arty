@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Data & outputs
+data/
+*.pth
+*.pt
+checkpoints/
+logs/
+runs/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store

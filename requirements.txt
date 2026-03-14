@@ -8,3 +8,4 @@ pandas>=2.0
 matplotlib>=3.7
 tqdm>=4.65
 huggingface_hub>=0.20 # model upload + Gradio Spaces (Phase 2)
+pytest>=7.0          # tests

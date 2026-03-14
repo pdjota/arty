@@ -1,0 +1,10 @@
+# Art classification — CNN-RNN (ResNet-50 + BiLSTM), WikiArt
+torch>=2.0
+torchvision>=0.15
+datasets>=2.14        # HuggingFace streaming dataset access
+numpy>=1.24
+Pillow>=10.0
+pandas>=2.0
+matplotlib>=3.7
+tqdm>=4.65
+huggingface_hub>=0.20 # model upload + Gradio Spaces (Phase 2)

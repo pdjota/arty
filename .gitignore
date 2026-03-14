@@ -24,6 +24,7 @@ runs/
 
 # Keep the metadata index in the repo (small, useful to commit)
 !data/wikiart_index.csv
+!data/wikiart_index_selected.csv
 
 # IDE & OS
 .idea/

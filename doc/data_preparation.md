@@ -21,9 +21,9 @@ which we include in the repo for convenience `data/artgan_csv`. There's a slight
 Using `scripts/validate_artgan_paths.py` to validate
 
 
-## 3. Rebuild the index
+## 3. Build the indexes
 
-From the repo root:
+We are going to create files with indexed, to know which files to train/eval in selected.
 
 ```bash
 python scripts/build_artgan_index.py
@@ -31,14 +31,14 @@ python scripts/build_artgan_index.py
 
 The script scans `data/wikiart/`, uses `style_class.txt` for `style_id`, merges genre from the two genre CSVs, and writes **`data/wikiart_index.csv`** with exactly:
 
-| Column       | Description                                |
-| ------------ | ------------------------------------------ |
-| `image_id`   | Sequential 0-based id                       |
-| `local_path` | Path relative to `data/wikiart/`            |
-| `style`      | Style name (from directory)                 |
+| Column       | Description                                  |
+| ------------ | ---------------------------------------------|
+| `image_id`   | Sequential 0-based id                        |
+| `local_path` | Path relative to `data/wikiart/`             |
+| `style`      | Style name (from directory)                  |
 | `style_id`   | ArtGAN style class index                     |
 | `artist`     | Artist slug (from filename)                  |
-| `artist_id`  | ArtGAN artist class index; `-1` when unknown|
+| `artist_id`  | ArtGAN artist class index; `-1` when unknown |
 | `genre`      | Genre name; empty when unknown               |
 | `genre_id`   | ArtGAN genre index; `-1` when unknown        |
 

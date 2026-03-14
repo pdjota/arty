@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+.env
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Data & outputs — large dirs and model files are not committed
+data/arty_cache/
+data/images/
+data/wikiart/
+data/wikiart.zip
+*.pth
+*.pt
+checkpoints/
+logs/
+runs/
+
+# Keep the metadata index in the repo (small, useful to commit)
+!data/wikiart_index.csv
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store

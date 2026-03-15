@@ -1,0 +1,12 @@
+---
+description: Add tests when creating new methods
+alwaysApply: true
+---
+
+# Test new methods
+
+When you add a new function or method to the codebase, add a corresponding test.
+
+- Prefer the existing test layout: e.g. `scripts/build_artgan_index.py` → `tests/test_build_artgan_index.py`.
+- Use `importlib` or direct imports as the project already does; keep tests self-contained with minimal fixtures (e.g. temp dirs, fake files).
+- Cover at least one success path and, if relevant, edge cases (empty input, unknown/missing values).

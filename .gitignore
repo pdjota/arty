@@ -26,6 +26,14 @@ runs/
 !data/wikiart_index.csv
 !data/wikiart_index_selected.csv
 
+# Coverage
+.coverage
+htmlcov/
+
+# Exclude from commit
+Arty.ipynb
+plan.md
+
 # IDE & OS
 .idea/
 .vscode/

@@ -15,6 +15,7 @@ build/
 data/arty_cache/
 data/images/
 data/wikiart/
+data/wikiart_excluded/
 data/wikiart.zip
 *.pth
 *.pt

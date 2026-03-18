@@ -103,6 +103,30 @@ def topk_to_readable(
     return out
 
 
+def confidence_bucket(prob_pct: float) -> str:
+    if prob_pct >= 80.0:
+        return "very likely"
+    if prob_pct >= 60.0:
+        return "possible"
+    if prob_pct >= 40.0:
+        return "unlikely"
+    return "low confidence / Unknown"
+
+
+def summarize_topk(items: List[Dict[str, Any]]) -> str:
+    if not items:
+        return "Unknown (low confidence / Unknown)"
+    top = items[0]
+    label = str(top.get("label", "Unknown"))
+    prob = float(top.get("prob", 0.0)) * 100.0
+    bucket = confidence_bucket(prob)
+    if prob < 40.0:
+        label = "Unknown"
+    others = [str(x.get("label", "")) for x in items[1:] if x.get("label")]
+    others_txt = f" (others: {', '.join(others)})" if others else ""
+    return f"{label} — {prob:.0f}% ({bucket}){others_txt}"
+
+
 def _get_assets(repo_id: str) -> Tuple[torch.nn.Module, Dict[int, str], Dict[int, str], Dict[int, str]]:
     global _CACHED_REPO_ID, _CACHED_MODEL, _CACHED_LABELS
     repo_id = repo_id.strip()
@@ -126,9 +150,9 @@ def _resolve_repo_id(choice: str, override_repo_id: str) -> str:
     return BASELINE_MODEL_REPO_ID
 
 
-def predict(choice: str, override_repo_id: str, image: Image.Image) -> Dict[str, Any]:
+def predict(choice: str, override_repo_id: str, image: Image.Image) -> Tuple[str, Dict[str, Any]]:
     if image is None:
-        return {}
+        return "", {}
     try:
         rid = _resolve_repo_id(choice, override_repo_id) or DEFAULT_MODEL_REPO_ID
         # Detect arch for debugging (same logic as load_model, but without downloading twice)
@@ -141,17 +165,31 @@ def predict(choice: str, override_repo_id: str, image: Image.Image) -> Dict[str,
         x = transform(image).unsqueeze(0).to(DEVICE)
         with torch.no_grad():
             logits_g, logits_s, logits_a = model(x)
-        return {
+
+        genre_top3 = topk_to_readable(logits_g, gmap, k=3)
+        style_top3 = topk_to_readable(logits_s, smap, k=3)
+        artist_top3 = topk_to_readable(logits_a, amap, k=3)
+
+        summary_md = "\n".join(
+            [
+                f"**Most likely: Genre**: {summarize_topk(genre_top3)}",
+                f"**Most likely: Style**: {summarize_topk(style_top3)}",
+                f"**Most likely: Artist**: {summarize_topk(artist_top3)}",
+            ]
+        )
+
+        details = {
             "repo_id": rid,
             "selection": choice,
             "override_repo_id": (override_repo_id or "").strip(),
             "detected_arch": detected_arch,
-            "genre_top3": topk_to_readable(logits_g, gmap, k=3),
-            "style_top3": topk_to_readable(logits_s, smap, k=3),
-            "artist_top3": topk_to_readable(logits_a, amap, k=3),
+            "genre_top3": genre_top3,
+            "style_top3": style_top3,
+            "artist_top3": artist_top3,
         }
+        return summary_md, details
     except Exception as e:
-        return {
+        return "", {
             "error": str(e),
             "hint": "Set Space secret HF_TOKEN if repo is private, and set MODEL_REPO_ID (or type it here) to the correct model repo containing best_model.pt + *_id2label.json.",
             "repo_id_tried": rid,
@@ -175,9 +213,11 @@ with gr.Blocks(title="Arty: CNN-RNN WikiArt Classifier") as demo:
         placeholder="Leave blank to use the selected model above (e.g. pdjota/arty-cnn-baseline)",
     )
     img = gr.Image(type="pil", label="Upload a painting")
-    out = gr.JSON(label="Predictions")
+    summary = gr.Markdown()
+    with gr.Accordion("Details (top-3 + debug)", open=False):
+        out = gr.JSON(label="Predictions")
     btn = gr.Button("Predict")
-    btn.click(fn=predict, inputs=[model_choice, repo, img], outputs=[out])
+    btn.click(fn=predict, inputs=[model_choice, repo, img], outputs=[summary, out])
 
 
 if __name__ == "__main__":

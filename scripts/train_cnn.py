@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import os
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
@@ -92,6 +93,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.cpu:
+        # Guardrail: ensure we don't route any ops through MPS.
+        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "0"
         device = torch.device("cpu")
     elif torch.cuda.is_available():
         device = torch.device("cuda")
@@ -100,6 +103,7 @@ def main() -> None:
     else:
         device = torch.device("cpu")
     batch_size = args.batch_size if args.batch_size is not None else BATCH_SIZE
+    print(f"[device] Using device={device} (args.cpu={args.cpu})")
     ckpt_dir = CHECKPOINT_DIR / args.arch
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -183,13 +187,21 @@ def main() -> None:
         print(f"      Starting from scratch; running {total_epochs_this_run} epochs.")
     print()
 
+    current_epoch: int | None = None
+    current_batch_in_epoch: int | None = None
+    current_num_batches_in_epoch: int | None = None
+
     try:
         for i in range(total_epochs_this_run):
             epoch = start_epoch + i
+            current_epoch = epoch
+            current_batch_in_epoch = 0
+            current_num_batches_in_epoch = len(train_loader)
             print(f"--- Epoch {epoch} (step {i + 1}/{total_epochs_this_run}) ---")
             model.train()
             train_loss = 0.0
-            for images, style_id, artist_id, genre_id in train_loader:
+            for b, (images, style_id, artist_id, genre_id) in enumerate(train_loader, start=1):
+                current_batch_in_epoch = b
                 images = images.to(device)
                 style_id = style_id.to(device)
                 artist_id = artist_id.to(device)
@@ -277,7 +289,29 @@ def main() -> None:
                 f"genre={acc_g:.2%}  style={acc_s:.2%}  artist={acc_a:.2%}  artist_top5={acc_a5:.2%}  best={is_best}{save_msg}"
             )
     except KeyboardInterrupt:
-        print("\nStopped by user (Ctrl+C). Last completed epoch saved in checkpoints/last.pt")
+        # Save a resumable checkpoint even if interrupted mid-epoch.
+        interrupted_ckpt = {
+            "epoch": current_epoch if current_epoch is not None else -1,
+            "arch": args.arch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "val_loss": None,
+            "val_genre_acc": None,
+            "val_style_acc": None,
+            "val_artist_acc": None,
+            "val_artist_top5_acc": None,
+            "n_genre": N_GENRE,
+            "n_style": N_STYLE,
+            "n_artist": N_ARTIST,
+            "interrupted": True,
+            "batch_in_epoch": current_batch_in_epoch,
+            "num_batches_in_epoch": current_num_batches_in_epoch,
+        }
+        torch.save(interrupted_ckpt, ckpt_dir / "last.pt")
+        print(
+            "\nStopped by user (Ctrl+C). Saved resumable checkpoint to "
+            f"{(ckpt_dir / 'last.pt').resolve()}"
+        )
     finally:
         _log_next_steps()
 

@@ -214,7 +214,7 @@ with gr.Blocks(title="Arty: CNN-RNN WikiArt Classifier") as demo:
     )
     img = gr.Image(type="pil", label="Upload a painting")
     summary = gr.Markdown()
-    with gr.Accordion("Details (top-3 + debug)", open=False):
+    with gr.Accordion("Details (top-3 + debug)", open=True):
         out = gr.JSON(label="Predictions")
     btn = gr.Button("Predict")
     btn.click(fn=predict, inputs=[model_choice, repo, img], outputs=[summary, out])

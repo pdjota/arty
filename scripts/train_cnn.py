@@ -1,8 +1,10 @@
 """
 Train CNN (ResNet-50 + GAP + 3 heads) on selected index.
 Stratified 70/15/15 train/val/test by artist; checkpoints to checkpoints/.
-Usage: python scripts/train_cnn.py [--epochs N] [--resume]
+Usage: python scripts/train_cnn.py [--epochs N] [--resume] [--batch-size N] [--cpu]
   --resume: load last.pt and train --epochs more (default 10).
+  --batch-size N: default 64; use 16 or 32 if MPS OOM on Mac.
+  --cpu: force CPU (avoids MPS out-of-memory on Apple Silicon).
 
 Persistence (all under checkpoints/):
   - last.pt: latest epoch (model + optimizer) — used by --resume.
@@ -81,29 +83,37 @@ def main() -> None:
         print(f"ERROR: {WIKIART_ROOT} not found.")
         sys.exit(1)
 
-    if torch.cuda.is_available():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=None, help="Total epochs (or extra if --resume)")
+    parser.add_argument("--resume", action="store_true", help="Load last.pt and train --epochs more (default 10)")
+    parser.add_argument("--batch-size", type=int, default=None, help="Batch size (default from config). Use 16 or 32 if MPS OOM.")
+    parser.add_argument("--cpu", action="store_true", help="Force CPU (avoids MPS out-of-memory on Mac)")
+    args = parser.parse_args()
+
+    if args.cpu:
+        device = torch.device("cpu")
+    elif torch.cuda.is_available():
         device = torch.device("cuda")
     elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
-        device = torch.device("mps")  # Mac GPU (Apple Silicon)
+        device = torch.device("mps")
     else:
         device = torch.device("cpu")
+    batch_size = args.batch_size if args.batch_size is not None else BATCH_SIZE
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(INDEX_SELECTED)
+    print(f"[1/5] Loaded index: {len(df):,} rows from {INDEX_SELECTED.name}")
     idx_train, idx_val, idx_test = stratified_split(df)
+    print(f"[2/5] Split: train {len(idx_train):,}, val {len(idx_val):,}, test {len(idx_test):,}")
 
     train_ds = WikiArtDataset(INDEX_SELECTED, WIKIART_ROOT, transform=get_transforms(train=True))
     val_ds = WikiArtDataset(INDEX_SELECTED, WIKIART_ROOT, transform=get_transforms(train=False))
     train_subset = Subset(train_ds, idx_train)
     val_subset = Subset(val_ds, idx_val)
 
-    train_loader = DataLoader(train_subset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
-    val_loader = DataLoader(val_subset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=None, help="Total epochs (or extra if --resume)")
-    parser.add_argument("--resume", action="store_true", help="Load last.pt and train --epochs more (default 10)")
-    args = parser.parse_args()
+    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=(device.type == "cuda"))
+    val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=0)
+    print(f"[3/5] Data loaders ready: {len(train_loader)} train batches, {len(val_loader)} val batches (batch_size={batch_size})")
 
     start_epoch = 0
     best_val_loss = float("inf")
@@ -144,6 +154,7 @@ def main() -> None:
 
     total_steps = total_epochs_this_run * len(train_loader)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
+    print(f"[4/5] Model and optimizer ready. Scheduler: CosineAnnealingLR (T_max={total_steps})")
 
     def _log_next_steps() -> None:
         print("\n--- Persistence (checkpoints/) ---")
@@ -154,18 +165,17 @@ def main() -> None:
         print("To resume training:  python scripts/train_cnn.py --resume --epochs N")
         print("To evaluate best:   python scripts/eval_cnn.py")
 
-    print(f"Device: {device}")
-    print(f"Train batches: {len(train_loader)}  Val batches: {len(val_loader)}")
-    print(f"Saving to: {CHECKPOINT_DIR.resolve()}")
+    print(f"[5/5] Device: {device}  Saving to: {CHECKPOINT_DIR.resolve()}")
     if start_epoch > 0:
-        print(f"Resumed from epoch {start_epoch - 1}; running epochs {start_epoch}..{start_epoch + total_epochs_this_run - 1}")
+        print(f"      Resumed from epoch {start_epoch - 1}; running {total_epochs_this_run} more epochs.")
     else:
-        print(f"Starting from scratch; running {total_epochs_this_run} epochs")
+        print(f"      Starting from scratch; running {total_epochs_this_run} epochs.")
     print()
 
     try:
         for i in range(total_epochs_this_run):
             epoch = start_epoch + i
+            print(f"--- Epoch {epoch} (step {i + 1}/{total_epochs_this_run}) ---")
             model.train()
             train_loss = 0.0
             for images, style_id, artist_id, genre_id in train_loader:
@@ -251,7 +261,7 @@ def main() -> None:
 
             save_msg = "  [saved last.pt" + (" + best.pt" if is_best else "") + "]"
             print(
-                f"epoch {epoch}  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
+                f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
                 f"genre={acc_g:.2%}  style={acc_s:.2%}  artist={acc_a:.2%}  artist_top5={acc_a5:.2%}  best={is_best}{save_msg}"
             )
     except KeyboardInterrupt:

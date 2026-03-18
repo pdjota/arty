@@ -181,5 +181,7 @@ with gr.Blocks(title="Arty: CNN-RNN WikiArt Classifier") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    # Spaces currently runs Gradio with SSR enabled by default; disable to avoid
+    # asyncio event-loop teardown warnings in some runtimes.
+    demo.launch(ssr_mode=False)
 

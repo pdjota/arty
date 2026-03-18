@@ -18,7 +18,9 @@ from model import ResNet50BiLSTMThreeHeads  # type: ignore
 from model import ResNet50ThreeHeads  # type: ignore
 
 
-DEFAULT_MODEL_REPO_ID = os.environ.get("MODEL_REPO_ID", "pdjota/arty-cnnrnn")
+DEFAULT_MODEL_REPO_ID = os.environ.get("MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
+BASELINE_MODEL_REPO_ID = os.environ.get("BASELINE_MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
+CNNRNN_MODEL_REPO_ID = os.environ.get("CNNRNN_MODEL_REPO_ID", "pdjota/arty-cnnrnn")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
@@ -115,11 +117,20 @@ def _get_assets(repo_id: str) -> Tuple[torch.nn.Module, Dict[int, str], Dict[int
     return model, g, s, a
 
 
-def predict(repo_id: str, image: Image.Image) -> Dict[str, Any]:
+def _resolve_repo_id(choice: str, override_repo_id: str) -> str:
+    override_repo_id = (override_repo_id or "").strip()
+    if override_repo_id:
+        return override_repo_id
+    if choice == "CNN-RNN (BiLSTM)":
+        return CNNRNN_MODEL_REPO_ID
+    return BASELINE_MODEL_REPO_ID
+
+
+def predict(choice: str, override_repo_id: str, image: Image.Image) -> Dict[str, Any]:
     if image is None:
         return {}
     try:
-        rid = repo_id or DEFAULT_MODEL_REPO_ID
+        rid = _resolve_repo_id(choice, override_repo_id) or DEFAULT_MODEL_REPO_ID
         # Detect arch for debugging (same logic as load_model, but without downloading twice)
         ckpt_path = hf_hub_download(rid, "best_model.pt", repo_type="model", token=HF_TOKEN)
         ckpt = torch.load(ckpt_path, map_location="cpu")
@@ -132,6 +143,8 @@ def predict(repo_id: str, image: Image.Image) -> Dict[str, Any]:
             logits_g, logits_s, logits_a = model(x)
         return {
             "repo_id": rid,
+            "selection": choice,
+            "override_repo_id": (override_repo_id or "").strip(),
             "detected_arch": detected_arch,
             "genre_top3": topk_to_readable(logits_g, gmap, k=3),
             "style_top3": topk_to_readable(logits_s, smap, k=3),
@@ -141,7 +154,7 @@ def predict(repo_id: str, image: Image.Image) -> Dict[str, Any]:
         return {
             "error": str(e),
             "hint": "Set Space secret HF_TOKEN if repo is private, and set MODEL_REPO_ID (or type it here) to the correct model repo containing best_model.pt + *_id2label.json.",
-            "repo_id_tried": (repo_id or DEFAULT_MODEL_REPO_ID),
+            "repo_id_tried": rid,
             "hf_token_present": bool(HF_TOKEN),
         }
 
@@ -151,11 +164,20 @@ with gr.Blocks(title="Arty: CNN-RNN WikiArt Classifier") as demo:
         "Upload a painting to get top-3 predictions for **genre**, **style**, and **artist**.\n\n"
         "If the model repo is private or the repo id is wrong, you’ll see an error JSON instead of the Space crashing."
     )
-    repo = gr.Textbox(label="Model repo id (HF)", value=DEFAULT_MODEL_REPO_ID)
+    model_choice = gr.Dropdown(
+        label="Model",
+        choices=["CNN baseline", "CNN-RNN (BiLSTM)"],
+        value="CNN baseline",
+    )
+    repo = gr.Textbox(
+        label="Override model repo id (optional)",
+        value="",
+        placeholder="Leave blank to use the selected model above (e.g. pdjota/arty-cnn-baseline)",
+    )
     img = gr.Image(type="pil", label="Upload a painting")
     out = gr.JSON(label="Predictions")
     btn = gr.Button("Predict")
-    btn.click(fn=predict, inputs=[repo, img], outputs=[out])
+    btn.click(fn=predict, inputs=[model_choice, repo, img], outputs=[out])
 
 
 if __name__ == "__main__":

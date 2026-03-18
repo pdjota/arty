@@ -42,3 +42,35 @@ def test_materialize_snapshot_to_training_layout_copies_index_and_images(tmp_pat
     # Second image missing in snapshot: should not be copied.
     assert not (data_dir / "wikiart/Post_Impressionism/vincent-van-gogh_starry-night.jpg").exists()
 
+
+def test_materialize_snapshot_excludes_default_local_path(tmp_path: Path) -> None:
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+
+    excluded = "Post_Impressionism/vincent-van-gogh_l-arlesienne-portrait-of-madame-ginoux-1890.jpg"
+    df = pd.DataFrame(
+        [
+            {"local_path": excluded, "style_id": 1, "artist_id": 2, "genre_id": 0},
+            {"local_path": "Impressionism/claude-monet_water-lilies-1906.jpg", "style_id": 1, "artist_id": 2, "genre_id": 0},
+        ]
+    )
+    (snapshot / "wikiart_index_selected.csv").write_text(df.to_csv(index=False))
+
+    # Create both images in the snapshot.
+    img_excluded = snapshot / excluded
+    img_excluded.parent.mkdir(parents=True, exist_ok=True)
+    img_excluded.write_bytes(b"\xff\xd8\xff")
+
+    img_kept = snapshot / "Impressionism/claude-monet_water-lilies-1906.jpg"
+    img_kept.parent.mkdir(parents=True, exist_ok=True)
+    img_kept.write_bytes(b"\xff\xd8\xff")
+
+    data_dir = tmp_path / "data"
+    mod.materialize_snapshot_to_training_layout(snapshot, data_dir)
+
+    # Excluded image should not be copied, index row should be removed.
+    assert not (data_dir / f"wikiart/{excluded}").exists()
+    kept_index = pd.read_csv(data_dir / "wikiart_index_selected.csv")
+    assert excluded not in kept_index["local_path"].astype(str).values
+    assert (data_dir / "wikiart/Impressionism/claude-monet_water-lilies-1906.jpg").exists()
+

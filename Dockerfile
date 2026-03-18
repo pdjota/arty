@@ -23,6 +23,10 @@ ENV BATCH_SIZE_FALLBACK=16
 
 # Space secret `HF_TOKEN` must be provided for uploading/downloading.
 CMD bash -lc "\
+  # Keep the container healthy while long-running training is happening. \
+  python -m http.server 7860 --bind 0.0.0.0 >/dev/null 2>&1 & \
+  SERVER_PID=$!; \
+  trap 'kill ${SERVER_PID} >/dev/null 2>&1 || true' EXIT; \
   python scripts/materialize_artyset_from_hf.py --repo-id \"$HF_DATASET_ID\" --data-dir data && \
   python scripts/train_cnn_safe.py --arch \"$ARCH\" --epochs \"$EPOCHS\" --batch-size-primary \"$BATCH_SIZE_PRIMARY\" --batch-size-fallback \"$BATCH_SIZE_FALLBACK\" && \
   python scripts/upload_model_to_hf.py --repo-id \"$MODEL_REPO_ID\" --checkpoint \"checkpoints/$ARCH/best.pt\" --export-labels-dir data/label_maps \

@@ -16,9 +16,15 @@ import argparse
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 import pandas as pd
+
+
+DEFAULT_EXCLUDE_LOCAL_PATHS: Sequence[str] = (
+    # Known corrupted image in the selected subset (kept in HF dataset for historical reasons).
+    "Post_Impressionism/vincent-van-gogh_l-arlesienne-portrait-of-madame-ginoux-1890.jpg",
+)
 
 
 def snapshot_download(
@@ -47,7 +53,12 @@ def snapshot_download(
     return Path(snapshot_path)
 
 
-def materialize_snapshot_to_training_layout(snapshot_path: Path, data_dir: Path) -> None:
+def materialize_snapshot_to_training_layout(
+    snapshot_path: Path,
+    data_dir: Path,
+    *,
+    exclude_local_paths: Optional[Sequence[str]] = None,
+) -> None:
     """
     Copy dataset snapshot contents into `data/wikiart*` files used by training.
     """
@@ -62,13 +73,18 @@ def materialize_snapshot_to_training_layout(snapshot_path: Path, data_dir: Path)
     out_wikiart_root = data_dir / "wikiart"
     out_wikiart_root.mkdir(parents=True, exist_ok=True)
 
-    # Copy the index CSV (small file)
-    shutil.copy2(index_src, out_index)
-
-    # Copy only images referenced by local_path in the index.
-    df = pd.read_csv(out_index)
+    # Copy only images referenced by local_path in the index,
+    # while optionally excluding known-broken rows.
+    df = pd.read_csv(index_src)
     if "local_path" not in df.columns:
         raise ValueError("Index CSV must contain `local_path` column")
+
+    excludes = list(exclude_local_paths) if exclude_local_paths is not None else list(DEFAULT_EXCLUDE_LOCAL_PATHS)
+    if excludes:
+        df = df[~df["local_path"].astype(str).isin(excludes)].reset_index(drop=True)
+
+    # Write filtered index CSV back to training layout.
+    df.to_csv(out_index, index=False)
 
     local_paths = df["local_path"].astype(str).unique().tolist()
     missing = 0
@@ -92,6 +108,12 @@ def main() -> None:
     p.add_argument("--data-dir", type=Path, default=Path("data"), help="Where to write data/")
     p.add_argument("--cache-dir", type=Path, default=Path("data/.hf_cache"), help="HF snapshot cache directory")
     p.add_argument(
+        "--exclude-local-path",
+        action="append",
+        default=None,
+        help="Exclude one or more dataset rows by their `local_path` value. Can be provided multiple times.",
+    )
+    p.add_argument(
         "--token",
         default=None,
         help="Optional HF token (defaults to HF_TOKEN env var if present).",
@@ -102,17 +124,22 @@ def main() -> None:
 
     token = args.token or os.environ.get("HF_TOKEN")
 
-    # If already present, don't re-materialize.
     out_index = args.data_dir / "wikiart_index_selected.csv"
     out_wikiart_root = args.data_dir / "wikiart"
+
+    excludes = args.exclude_local_path if args.exclude_local_path else None
     if out_index.exists() and out_wikiart_root.exists():
-        print(f"[materialize] Using existing dataset at {args.data_dir}")
+        # Ensure the exclude list is applied even if files were already materialized.
+        df = pd.read_csv(out_index)
+        if "local_path" in df.columns and (excludes or DEFAULT_EXCLUDE_LOCAL_PATHS):
+            df = df[~df["local_path"].astype(str).isin(list(excludes) if excludes else list(DEFAULT_EXCLUDE_LOCAL_PATHS))].reset_index(drop=True)
+            df.to_csv(out_index, index=False)
         return
 
     with tempfile.TemporaryDirectory() as tmp:
         # We stage snapshots under cache-dir to get reuse across restarts.
         snapshot = snapshot_download(args.repo_id, token=token, local_dir=args.cache_dir)
-        materialize_snapshot_to_training_layout(snapshot, args.data_dir)
+        materialize_snapshot_to_training_layout(snapshot, args.data_dir, exclude_local_paths=excludes)
 
     print(f"[materialize] Done. Wrote dataset to {args.data_dir}")
 

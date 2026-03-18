@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 import os
+from datetime import datetime
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
@@ -76,12 +77,16 @@ def stratified_split(df: pd.DataFrame, seed: int = 42):
     return idx_train, idx_val, idx_test
 
 
+def now_ts() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def main() -> None:
     if not INDEX_SELECTED.exists():
-        print(f"ERROR: {INDEX_SELECTED} not found. Run scripts/build_artgan_index.py first.")
+        print(f"[{now_ts()}] ERROR: {INDEX_SELECTED} not found. Run scripts/build_artgan_index.py first.")
         sys.exit(1)
     if not WIKIART_ROOT.exists():
-        print(f"ERROR: {WIKIART_ROOT} not found.")
+        print(f"[{now_ts()}] ERROR: {WIKIART_ROOT} not found.")
         sys.exit(1)
 
     parser = argparse.ArgumentParser()
@@ -103,14 +108,14 @@ def main() -> None:
     else:
         device = torch.device("cpu")
     batch_size = args.batch_size if args.batch_size is not None else BATCH_SIZE
-    print(f"[device] Using device={device} (args.cpu={args.cpu})")
+    print(f"[{now_ts()}] [device] Using device={device} (args.cpu={args.cpu})")
     ckpt_dir = CHECKPOINT_DIR / args.arch
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(INDEX_SELECTED)
-    print(f"[1/5] Loaded index: {len(df):,} rows from {INDEX_SELECTED.name}")
+    print(f"[{now_ts()}] [1/5] Loaded index: {len(df):,} rows from {INDEX_SELECTED.name}")
     idx_train, idx_val, idx_test = stratified_split(df)
-    print(f"[2/5] Split: train {len(idx_train):,}, val {len(idx_val):,}, test {len(idx_test):,}")
+    print(f"[{now_ts()}] [2/5] Split: train {len(idx_train):,}, val {len(idx_val):,}, test {len(idx_test):,}")
 
     train_ds = WikiArtDataset(INDEX_SELECTED, WIKIART_ROOT, transform=get_transforms(train=True))
     val_ds = WikiArtDataset(INDEX_SELECTED, WIKIART_ROOT, transform=get_transforms(train=False))
@@ -119,7 +124,9 @@ def main() -> None:
 
     train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=(device.type == "cuda"))
     val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=0)
-    print(f"[3/5] Data loaders ready: {len(train_loader)} train batches, {len(val_loader)} val batches (batch_size={batch_size})")
+    print(
+        f"[{now_ts()}] [3/5] Data loaders ready: {len(train_loader)} train batches, {len(val_loader)} val batches (batch_size={batch_size})"
+    )
 
     start_epoch = 0
     best_val_loss = float("inf")
@@ -131,10 +138,10 @@ def main() -> None:
         best_val_loss = ckpt.get("val_loss", float("inf"))
         extra = args.epochs if args.epochs is not None else 10
         total_epochs_this_run = extra
-        print(f"Resuming from epoch {start_epoch - 1}, training {total_epochs_this_run} more epochs.")
+        print(f"[{now_ts()}] Resuming from epoch {start_epoch - 1}, training {total_epochs_this_run} more epochs.")
     else:
         if args.resume:
-            print("WARNING: --resume but no last.pt found; starting from scratch.")
+            print(f"[{now_ts()}] WARNING: --resume but no last.pt found; starting from scratch.")
         extra = None
         total_epochs_this_run = args.epochs if args.epochs is not None else EPOCHS + COOLDOWN_EPOCHS
 
@@ -168,7 +175,7 @@ def main() -> None:
 
     total_steps = total_epochs_this_run * len(train_loader)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
-    print(f"[4/5] Model and optimizer ready. Scheduler: CosineAnnealingLR (T_max={total_steps})")
+    print(f"[{now_ts()}] [4/5] Model and optimizer ready. Scheduler: CosineAnnealingLR (T_max={total_steps})")
 
     def _log_next_steps() -> None:
         print("\n--- Persistence (checkpoints/) ---")
@@ -180,11 +187,11 @@ def main() -> None:
         print(f"To resume training:  python scripts/train_cnn.py --arch {args.arch} --resume --epochs N")
         print(f"To evaluate best:    python scripts/eval_cnn.py --arch {args.arch}")
 
-    print(f"[5/5] Device: {device}  Arch: {args.arch}  Saving to: {ckpt_dir.resolve()}")
+    print(f"[{now_ts()}] [5/5] Device: {device}  Arch: {args.arch}  Saving to: {ckpt_dir.resolve()}")
     if start_epoch > 0:
-        print(f"      Resumed from epoch {start_epoch - 1}; running {total_epochs_this_run} more epochs.")
+        print(f"[{now_ts()}]       Resumed from epoch {start_epoch - 1}; running {total_epochs_this_run} more epochs.")
     else:
-        print(f"      Starting from scratch; running {total_epochs_this_run} epochs.")
+        print(f"[{now_ts()}]       Starting from scratch; running {total_epochs_this_run} epochs.")
     print()
 
     current_epoch: int | None = None
@@ -197,7 +204,7 @@ def main() -> None:
             current_epoch = epoch
             current_batch_in_epoch = 0
             current_num_batches_in_epoch = len(train_loader)
-            print(f"--- Epoch {epoch} (step {i + 1}/{total_epochs_this_run}) ---")
+            print(f"[{now_ts()}] --- Epoch {epoch} (step {i + 1}/{total_epochs_this_run}) ---")
             model.train()
             train_loss = 0.0
             for b, (images, style_id, artist_id, genre_id) in enumerate(train_loader, start=1):
@@ -285,7 +292,7 @@ def main() -> None:
 
             save_msg = "  [saved last.pt" + (" + best.pt" if is_best else "") + "]"
             print(
-                f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
+                f"[{now_ts()}]   train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  "
                 f"genre={acc_g:.2%}  style={acc_s:.2%}  artist={acc_a:.2%}  artist_top5={acc_a5:.2%}  best={is_best}{save_msg}"
             )
     except KeyboardInterrupt:
@@ -309,7 +316,8 @@ def main() -> None:
         }
         torch.save(interrupted_ckpt, ckpt_dir / "last.pt")
         print(
-            "\nStopped by user (Ctrl+C). Saved resumable checkpoint to "
+            "\n"
+            f"[{now_ts()}] Stopped by user (Ctrl+C). Saved resumable checkpoint to "
             f"{(ckpt_dir / 'last.pt').resolve()}"
         )
     finally:
@@ -329,8 +337,8 @@ def main() -> None:
             "val_artist_top5_acc": best_ckpt.get("val_artist_top5_acc"),
         }
         pd.DataFrame([summary]).to_csv(ckpt_dir / "results_summary.csv", index=False)
-        print("Results summary:", ckpt_dir / "results_summary.csv")
-    print("Done. Best checkpoint:", best_ckpt_path)
+        print(f"[{now_ts()}] Results summary:", ckpt_dir / "results_summary.csv")
+    print(f"[{now_ts()}] Done. Best checkpoint:", best_ckpt_path)
 
 
 if __name__ == "__main__":

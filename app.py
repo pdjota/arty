@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -16,19 +17,20 @@ sys.path.insert(0, str(ROOT / "src"))
 from model import ResNet50BiLSTMThreeHeads  # type: ignore
 
 
-MODEL_REPO_ID = "pdjota/arty-cnnrnn"  # adjust if different
+MODEL_REPO_ID = os.environ.get("MODEL_REPO_ID", "pdjota/arty-cnnrnn")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
 
 def load_id2label(filename: str) -> Dict[int, str]:
-    path = hf_hub_download(MODEL_REPO_ID, filename, repo_type="model")
+    path = hf_hub_download(MODEL_REPO_ID, filename, repo_type="model", token=HF_TOKEN)
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
     return {int(k): v for k, v in raw.items()}
 
 
 def load_model() -> Tuple[torch.nn.Module, Dict[int, str], Dict[int, str], Dict[int, str]]:
-    ckpt_path = hf_hub_download(MODEL_REPO_ID, "best_model.pt", repo_type="model")
+    ckpt_path = hf_hub_download(MODEL_REPO_ID, "best_model.pt", repo_type="model", token=HF_TOKEN)
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
 
     n_genre = ckpt["n_genre"]

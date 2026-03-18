@@ -1,7 +1,7 @@
 """
 Train CNN (ResNet-50 + GAP + 3 heads) on selected index.
 Stratified 70/15/15 train/val/test by artist; checkpoints to checkpoints/.
-Usage: python scripts/train_cnn.py [--epochs N] [--resume] [--batch-size N] [--cpu]
+Usage: python scripts/train_cnn.py [--arch cnn|cnnrnn] [--epochs N] [--resume] [--batch-size N] [--cpu]
   --resume: load last.pt and train --epochs more (default 10).
   --batch-size N: default 64; use 16 or 32 if MPS OOM on Mac.
   --cpu: force CPU (avoids MPS out-of-memory on Apple Silicon).
@@ -46,7 +46,7 @@ from config import (
     IMAGENET_STD,
 )
 from dataset import WikiArtDataset
-from model import ResNet50ThreeHeads
+from model import ResNet50BiLSTMThreeHeads, ResNet50ThreeHeads
 
 
 def get_transforms(train: bool):
@@ -84,6 +84,7 @@ def main() -> None:
         sys.exit(1)
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--arch", type=str, default="cnn", choices=["cnn", "cnnrnn"], help="Model architecture")
     parser.add_argument("--epochs", type=int, default=None, help="Total epochs (or extra if --resume)")
     parser.add_argument("--resume", action="store_true", help="Load last.pt and train --epochs more (default 10)")
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size (default from config). Use 16 or 32 if MPS OOM.")
@@ -99,7 +100,8 @@ def main() -> None:
     else:
         device = torch.device("cpu")
     batch_size = args.batch_size if args.batch_size is not None else BATCH_SIZE
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    ckpt_dir = CHECKPOINT_DIR / args.arch
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(INDEX_SELECTED)
     print(f"[1/5] Loaded index: {len(df):,} rows from {INDEX_SELECTED.name}")
@@ -117,7 +119,7 @@ def main() -> None:
 
     start_epoch = 0
     best_val_loss = float("inf")
-    resume_path = CHECKPOINT_DIR / "last.pt"
+    resume_path = ckpt_dir / "last.pt"
 
     if args.resume and resume_path.exists():
         ckpt = torch.load(resume_path, map_location=device)
@@ -132,13 +134,21 @@ def main() -> None:
         extra = None
         total_epochs_this_run = args.epochs if args.epochs is not None else EPOCHS + COOLDOWN_EPOCHS
 
-    model = ResNet50ThreeHeads(n_genre=N_GENRE, n_style=N_STYLE, n_artist=N_ARTIST).to(device)
-    backbone_params = list(model.backbone.parameters()) + list(model.pool.parameters())
-    head_params = (
-        list(model.genre_head.parameters())
-        + list(model.style_head.parameters())
-        + list(model.artist_head.parameters())
-    )
+    if args.arch == "cnnrnn":
+        model = ResNet50BiLSTMThreeHeads(n_genre=N_GENRE, n_style=N_STYLE, n_artist=N_ARTIST).to(device)
+        backbone_params = list(model.backbone.parameters())
+        head_params = list(model.lstm.parameters())
+        head_params += list(model.genre_head.parameters())
+        head_params += list(model.style_head.parameters())
+        head_params += list(model.artist_head.parameters())
+    else:
+        model = ResNet50ThreeHeads(n_genre=N_GENRE, n_style=N_STYLE, n_artist=N_ARTIST).to(device)
+        backbone_params = list(model.backbone.parameters()) + list(model.pool.parameters())
+        head_params = (
+            list(model.genre_head.parameters())
+            + list(model.style_head.parameters())
+            + list(model.artist_head.parameters())
+        )
     optimizer = torch.optim.SGD(
         [
             {"params": backbone_params, "lr": LR_BACKBONE},
@@ -158,14 +168,15 @@ def main() -> None:
 
     def _log_next_steps() -> None:
         print("\n--- Persistence (checkpoints/) ---")
+        print(f"  arch dir    = {ckpt_dir}")
         print("  last.pt     = latest epoch (for --resume)")
         print("  best.pt     = best val_loss (for eval)")
         print("  train_log.csv = per-epoch metrics (append)")
         print("  results_summary.csv = best metrics (written at end)")
-        print("To resume training:  python scripts/train_cnn.py --resume --epochs N")
-        print("To evaluate best:   python scripts/eval_cnn.py")
+        print(f"To resume training:  python scripts/train_cnn.py --arch {args.arch} --resume --epochs N")
+        print(f"To evaluate best:    python scripts/eval_cnn.py --arch {args.arch}")
 
-    print(f"[5/5] Device: {device}  Saving to: {CHECKPOINT_DIR.resolve()}")
+    print(f"[5/5] Device: {device}  Arch: {args.arch}  Saving to: {ckpt_dir.resolve()}")
     if start_epoch > 0:
         print(f"      Resumed from epoch {start_epoch - 1}; running {total_epochs_this_run} more epochs.")
     else:
@@ -232,6 +243,7 @@ def main() -> None:
 
             ckpt = {
                 "epoch": epoch,
+                "arch": args.arch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_loss": val_loss,
@@ -243,9 +255,9 @@ def main() -> None:
                 "n_style": N_STYLE,
                 "n_artist": N_ARTIST,
             }
-            torch.save(ckpt, CHECKPOINT_DIR / "last.pt")
+            torch.save(ckpt, ckpt_dir / "last.pt")
             if is_best:
-                torch.save(ckpt, CHECKPOINT_DIR / "best.pt")
+                torch.save(ckpt, ckpt_dir / "best.pt")
 
             log_row = {
                 "epoch": epoch,
@@ -256,7 +268,7 @@ def main() -> None:
                 "artist_acc": round(acc_a, 4),
                 "artist_top5_acc": round(acc_a5, 4),
             }
-            log_path = CHECKPOINT_DIR / "train_log.csv"
+            log_path = ckpt_dir / "train_log.csv"
             pd.DataFrame([log_row]).to_csv(log_path, mode="a", header=not log_path.exists(), index=False)
 
             save_msg = "  [saved last.pt" + (" + best.pt" if is_best else "") + "]"
@@ -271,6 +283,7 @@ def main() -> None:
 
     # Save best-val results summary
     best_ckpt_path = CHECKPOINT_DIR / "best.pt"
+    best_ckpt_path = ckpt_dir / "best.pt"
     if best_ckpt_path.exists():
         best_ckpt = torch.load(best_ckpt_path, map_location="cpu")
         summary = {
@@ -281,8 +294,8 @@ def main() -> None:
             "val_artist_acc": best_ckpt.get("val_artist_acc"),
             "val_artist_top5_acc": best_ckpt.get("val_artist_top5_acc"),
         }
-        pd.DataFrame([summary]).to_csv(CHECKPOINT_DIR / "results_summary.csv", index=False)
-        print("Results summary:", CHECKPOINT_DIR / "results_summary.csv")
+        pd.DataFrame([summary]).to_csv(ckpt_dir / "results_summary.csv", index=False)
+        print("Results summary:", ckpt_dir / "results_summary.csv")
     print("Done. Best checkpoint:", best_ckpt_path)
 
 

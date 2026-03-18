@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from model import ResNet50BiLSTMThreeHeads  # type: ignore
+from model import ResNet50ThreeHeads  # type: ignore
 
 
 DEFAULT_MODEL_REPO_ID = os.environ.get("MODEL_REPO_ID", "pdjota/arty-cnnrnn")
@@ -37,13 +38,30 @@ def load_model(repo_id: str) -> Tuple[torch.nn.Module, Dict[int, str], Dict[int,
     n_style = ckpt["n_style"]
     n_artist = ckpt["n_artist"]
 
-    model = ResNet50BiLSTMThreeHeads(
-        n_genre=n_genre,
-        n_style=n_style,
-        n_artist=n_artist,
-        weights=None,
-    ).to(DEVICE)
-    model.load_state_dict(ckpt["model_state_dict"])
+    state = ckpt["model_state_dict"]
+    arch = ckpt.get("arch")
+    if arch is None:
+        # Heuristic: CNN checkpoints have heads on 2048-dim features.
+        # (artist_head.1.weight shape is [n_artist, feat_dim]).
+        feat_dim = state.get("artist_head.1.weight").shape[1] if "artist_head.1.weight" in state else None
+        arch = "cnn" if feat_dim == 2048 else "cnnrnn"
+
+    if arch == "cnnrnn":
+        model = ResNet50BiLSTMThreeHeads(
+            n_genre=n_genre,
+            n_style=n_style,
+            n_artist=n_artist,
+            weights=None,
+        ).to(DEVICE)
+    else:
+        model = ResNet50ThreeHeads(
+            n_genre=n_genre,
+            n_style=n_style,
+            n_artist=n_artist,
+            weights=None,
+        ).to(DEVICE)
+
+    model.load_state_dict(state)
     model.eval()
 
     genre_id2label = load_id2label(repo_id, "genre_id2label.json")

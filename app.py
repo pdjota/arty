@@ -20,7 +20,7 @@ from model import ResNet50ThreeHeads  # type: ignore
 
 DEFAULT_MODEL_REPO_ID = os.environ.get("MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
 BASELINE_MODEL_REPO_ID = os.environ.get("BASELINE_MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
-CNNRNN_MODEL_REPO_ID = os.environ.get("CNNRNN_MODEL_REPO_ID", "pdjota/arty-cnnrnn")
+CNNRNN_MODEL_REPO_ID = os.environ.get("CNNRNN_MODEL_REPO_ID", "pdjota/arty-cnn-rnn")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 

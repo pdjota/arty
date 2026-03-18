@@ -41,10 +41,9 @@ def load_model(repo_id: str) -> Tuple[torch.nn.Module, Dict[int, str], Dict[int,
     state = ckpt["model_state_dict"]
     arch = ckpt.get("arch")
     if arch is None:
-        # Heuristic: CNN checkpoints have heads on 2048-dim features.
-        # (artist_head.1.weight shape is [n_artist, feat_dim]).
-        feat_dim = state.get("artist_head.1.weight").shape[1] if "artist_head.1.weight" in state else None
-        arch = "cnn" if feat_dim == 2048 else "cnnrnn"
+        # Robust inference: CNN-RNN checkpoints contain LSTM parameters.
+        has_lstm = any(k.startswith("lstm.") for k in state.keys())
+        arch = "cnnrnn" if has_lstm else "cnn"
 
     if arch == "cnnrnn":
         model = ResNet50BiLSTMThreeHeads(
@@ -68,6 +67,7 @@ def load_model(repo_id: str) -> Tuple[torch.nn.Module, Dict[int, str], Dict[int,
     style_id2label = load_id2label(repo_id, "style_id2label.json")
     artist_id2label = load_id2label(repo_id, "artist_id2label.json")
 
+    # Return model + labels; arch is re-derived by caller if needed.
     return model, genre_id2label, style_id2label, artist_id2label
 
 
@@ -119,12 +119,20 @@ def predict(repo_id: str, image: Image.Image) -> Dict[str, Any]:
     if image is None:
         return {}
     try:
-        model, gmap, smap, amap = _get_assets(repo_id or DEFAULT_MODEL_REPO_ID)
+        rid = repo_id or DEFAULT_MODEL_REPO_ID
+        # Detect arch for debugging (same logic as load_model, but without downloading twice)
+        ckpt_path = hf_hub_download(rid, "best_model.pt", repo_type="model", token=HF_TOKEN)
+        ckpt = torch.load(ckpt_path, map_location="cpu")
+        state = ckpt.get("model_state_dict", {})
+        detected_arch = ckpt.get("arch") or ("cnnrnn" if any(str(k).startswith("lstm.") for k in state.keys()) else "cnn")
+
+        model, gmap, smap, amap = _get_assets(rid)
         x = transform(image).unsqueeze(0).to(DEVICE)
         with torch.no_grad():
             logits_g, logits_s, logits_a = model(x)
         return {
-            "repo_id": repo_id or DEFAULT_MODEL_REPO_ID,
+            "repo_id": rid,
+            "detected_arch": detected_arch,
             "genre_top3": topk_to_readable(logits_g, gmap, k=3),
             "style_top3": topk_to_readable(logits_s, smap, k=3),
             "artist_top3": topk_to_readable(logits_a, amap, k=3),

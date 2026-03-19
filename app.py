@@ -17,65 +17,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from model import ResNet50BiLSTMThreeHeads  # type: ignore
 from model import ResNet50ThreeHeads  # type: ignore
 
-
-DEFAULT_MODEL_REPO_ID = os.environ.get("MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
-BASELINE_MODEL_REPO_ID = os.environ.get("BASELINE_MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
-CNNRNN_MODEL_REPO_ID = os.environ.get("CNNRNN_MODEL_REPO_ID", "pdjota/arty-cnn-rnn")
+BASELINE_REPO = os.environ.get("BASELINE_MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
+CNNRNN_REPO = os.environ.get("CNNRNN_MODEL_REPO_ID", "pdjota/arty-cnn-rnn")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 HF_TOKEN = os.environ.get("HF_TOKEN")
-
-
-def load_id2label(repo_id: str, filename: str) -> Dict[int, str]:
-    path = hf_hub_download(repo_id, filename, repo_type="model", token=HF_TOKEN)
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    return {int(k): v for k, v in raw.items()}
-
-
-def load_model(repo_id: str) -> Tuple[torch.nn.Module, Dict[int, str], Dict[int, str], Dict[int, str]]:
-    ckpt_path = hf_hub_download(repo_id, "best_model.pt", repo_type="model", token=HF_TOKEN)
-    ckpt = torch.load(ckpt_path, map_location=DEVICE)
-
-    n_genre = ckpt["n_genre"]
-    n_style = ckpt["n_style"]
-    n_artist = ckpt["n_artist"]
-
-    state = ckpt["model_state_dict"]
-    arch = ckpt.get("arch")
-    if arch is None:
-        # Robust inference: CNN-RNN checkpoints contain LSTM parameters.
-        has_lstm = any(k.startswith("lstm.") for k in state.keys())
-        arch = "cnnrnn" if has_lstm else "cnn"
-
-    if arch == "cnnrnn":
-        model = ResNet50BiLSTMThreeHeads(
-            n_genre=n_genre,
-            n_style=n_style,
-            n_artist=n_artist,
-            weights=None,
-        ).to(DEVICE)
-    else:
-        model = ResNet50ThreeHeads(
-            n_genre=n_genre,
-            n_style=n_style,
-            n_artist=n_artist,
-            weights=None,
-        ).to(DEVICE)
-
-    model.load_state_dict(state)
-    model.eval()
-
-    genre_id2label = load_id2label(repo_id, "genre_id2label.json")
-    style_id2label = load_id2label(repo_id, "style_id2label.json")
-    artist_id2label = load_id2label(repo_id, "artist_id2label.json")
-
-    # Return model + labels; arch is re-derived by caller if needed.
-    return model, genre_id2label, style_id2label, artist_id2label
-
-
-_CACHED_REPO_ID: Optional[str] = None
-_CACHED_MODEL: Optional[torch.nn.Module] = None
-_CACHED_LABELS: Optional[Tuple[Dict[int, str], Dict[int, str], Dict[int, str]]] = None
 
 transform = T.Compose(
     [
@@ -86,142 +31,144 @@ transform = T.Compose(
     ]
 )
 
+# --- model cache -----------------------------------------------------------
 
-def topk_to_readable(
-    logits: torch.Tensor,
-    id2label: Dict[int, str],
-    k: int = 3,
-) -> List[Dict[str, Any]]:
-    probs = F.softmax(logits, dim=-1)
-    values, indices = probs.topk(k, dim=-1)
-    values = values[0].tolist()
-    indices = indices[0].tolist()
-    out: List[Dict[str, Any]] = []
-    for p, idx in zip(values, indices):
-        label = id2label.get(idx, str(idx))
-        out.append({"label": label, "id": int(idx), "prob": float(p)})
-    return out
+_cache: Dict[str, Any] = {}  # repo_id -> {model, genre, style, artist}
 
 
-def confidence_bucket(prob_pct: float) -> str:
-    if prob_pct >= 80.0:
+def _load(repo_id: str) -> Dict[str, Any]:
+    if repo_id in _cache:
+        return _cache[repo_id]
+
+    ckpt_path = hf_hub_download(repo_id, "best_model.pt", repo_type="model", token=HF_TOKEN)
+    ckpt = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
+
+    n_genre = ckpt["n_genre"]
+    n_style = ckpt["n_style"]
+    n_artist = ckpt["n_artist"]
+    state = ckpt["model_state_dict"]
+
+    arch = ckpt.get("arch") or ("cnnrnn" if any(k.startswith("lstm.") for k in state) else "cnn")
+
+    if arch == "cnnrnn":
+        model = ResNet50BiLSTMThreeHeads(n_genre=n_genre, n_style=n_style, n_artist=n_artist, weights=None)
+    else:
+        model = ResNet50ThreeHeads(n_genre=n_genre, n_style=n_style, n_artist=n_artist, weights=None)
+
+    model.load_state_dict(state)
+    model.to(DEVICE).eval()
+
+    def _id2label(filename: str) -> Dict[int, str]:
+        p = hf_hub_download(repo_id, filename, repo_type="model", token=HF_TOKEN)
+        with open(p, encoding="utf-8") as f:
+            return {int(k): v for k, v in json.load(f).items()}
+
+    entry = {
+        "model": model,
+        "arch": arch,
+        "genre": _id2label("genre_id2label.json"),
+        "style": _id2label("style_id2label.json"),
+        "artist": _id2label("artist_id2label.json"),
+    }
+    _cache[repo_id] = entry
+    return entry
+
+
+# --- prediction helpers ----------------------------------------------------
+
+def _topk(logits: torch.Tensor, id2label: Dict[int, str], k: int = 3) -> List[Dict[str, Any]]:
+    probs = F.softmax(logits, dim=-1)[0]
+    vals, idxs = probs.topk(k)
+    return [{"label": id2label.get(int(i), str(int(i))), "prob": round(float(v), 4)} for v, i in zip(vals, idxs)]
+
+
+def _bucket(pct: float) -> str:
+    if pct >= 80:
         return "very likely"
-    if prob_pct >= 60.0:
+    if pct >= 60:
         return "possible"
-    if prob_pct >= 40.0:
+    if pct >= 40:
         return "unlikely"
-    return "low confidence / Unknown"
+    return "low confidence"
 
 
-def summarize_topk(items: List[Dict[str, Any]]) -> str:
+def _summarize(items: List[Dict[str, Any]]) -> str:
     if not items:
-        return "Unknown (low confidence / Unknown)"
+        return "Unknown"
     top = items[0]
-    label = str(top.get("label", "Unknown"))
-    prob = float(top.get("prob", 0.0)) * 100.0
-    bucket = confidence_bucket(prob)
-    if prob < 40.0:
-        label = "Unknown"
-    others = [str(x.get("label", "")) for x in items[1:] if x.get("label")]
-    others_txt = f" (others: {', '.join(others)})" if others else ""
-    return f"{label} — {prob:.0f}% ({bucket}){others_txt}"
+    pct = top["prob"] * 100
+    label = top["label"] if pct >= 40 else "Unknown"
+    bucket = _bucket(pct)
+    rest = [x["label"] for x in items[1:]]
+    tail = f" (others: {', '.join(rest)})" if rest else ""
+    return f"{label} — {pct:.0f}% ({bucket}){tail}"
 
 
-def _get_assets(repo_id: str) -> Tuple[torch.nn.Module, Dict[int, str], Dict[int, str], Dict[int, str]]:
-    global _CACHED_REPO_ID, _CACHED_MODEL, _CACHED_LABELS
-    repo_id = repo_id.strip()
-    if _CACHED_MODEL is not None and _CACHED_LABELS is not None and _CACHED_REPO_ID == repo_id:
-        g, s, a = _CACHED_LABELS
-        return _CACHED_MODEL, g, s, a
+# --- main predict ----------------------------------------------------------
 
-    model, g, s, a = load_model(repo_id)
-    _CACHED_REPO_ID = repo_id
-    _CACHED_MODEL = model
-    _CACHED_LABELS = (g, s, a)
-    return model, g, s, a
-
-
-def _resolve_repo_id(choice: str, override_repo_id: str) -> str:
-    override_repo_id = (override_repo_id or "").strip()
-    if override_repo_id:
-        return override_repo_id
-    if choice == "CNN-RNN (BiLSTM)":
-        return CNNRNN_MODEL_REPO_ID
-    return BASELINE_MODEL_REPO_ID
-
-
-def predict(choice: str, override_repo_id: str, image: Image.Image) -> Tuple[str, Dict[str, Any]]:
+def predict(model_choice: str, image: Optional[Image.Image]) -> Tuple[str, str]:
     if image is None:
-        return "", {}
-    try:
-        rid = _resolve_repo_id(choice, override_repo_id) or DEFAULT_MODEL_REPO_ID
-        # Detect arch for debugging (same logic as load_model, but without downloading twice)
-        ckpt_path = hf_hub_download(rid, "best_model.pt", repo_type="model", token=HF_TOKEN)
-        ckpt = torch.load(ckpt_path, map_location="cpu")
-        state = ckpt.get("model_state_dict", {})
-        detected_arch = ckpt.get("arch") or ("cnnrnn" if any(str(k).startswith("lstm.") for k in state.keys()) else "cnn")
+        return "", ""
 
-        model, gmap, smap, amap = _get_assets(rid)
+    repo_id = CNNRNN_REPO if model_choice == "CNN-RNN (BiLSTM)" else BASELINE_REPO
+
+    try:
+        image = image.convert("RGB")
+        assets = _load(repo_id)
+        model = assets["model"]
+
         x = transform(image).unsqueeze(0).to(DEVICE)
         with torch.no_grad():
-            logits_g, logits_s, logits_a = model(x)
+            lg, ls, la = model(x)
 
-        genre_top3 = topk_to_readable(logits_g, gmap, k=3)
-        style_top3 = topk_to_readable(logits_s, smap, k=3)
-        artist_top3 = topk_to_readable(logits_a, amap, k=3)
+        g3 = _topk(lg, assets["genre"])
+        s3 = _topk(ls, assets["style"])
+        a3 = _topk(la, assets["artist"])
 
-        summary_md = "\n".join(
-            [
-                f"**Most likely: Genre**: {summarize_topk(genre_top3)}",
-                f"**Most likely: Style**: {summarize_topk(style_top3)}",
-                f"**Most likely: Artist**: {summarize_topk(artist_top3)}",
-            ]
-        )
+        summary = "\n".join([
+            f"**Genre**: {_summarize(g3)}",
+            f"**Style**: {_summarize(s3)}",
+            f"**Artist**: {_summarize(a3)}",
+        ])
+        details = json.dumps({
+            "model": repo_id,
+            "arch": assets["arch"],
+            "genre_top3": g3,
+            "style_top3": s3,
+            "artist_top3": a3,
+        }, indent=2)
+        return summary, details
 
-        details = {
-            "repo_id": rid,
-            "selection": choice,
-            "override_repo_id": (override_repo_id or "").strip(),
-            "detected_arch": detected_arch,
-            "genre_top3": genre_top3,
-            "style_top3": style_top3,
-            "artist_top3": artist_top3,
-        }
-        return summary_md, details
-    except Exception as e:
-        return "", {
-            "error": str(e),
-            "hint": "Set Space secret HF_TOKEN if repo is private, and set MODEL_REPO_ID (or type it here) to the correct model repo containing best_model.pt + *_id2label.json.",
-            "repo_id_tried": rid,
+    except Exception as exc:
+        err = json.dumps({
+            "error": str(exc),
+            "repo_id": repo_id,
             "hf_token_present": bool(HF_TOKEN),
-        }
+            "hint": "Check that the model repo exists and HF_TOKEN secret is set if it is private.",
+        }, indent=2)
+        return "", err
 
 
-with gr.Blocks(title="Arty: CNN-RNN WikiArt Classifier") as demo:
+# --- UI --------------------------------------------------------------------
+
+with gr.Blocks(title="Arty: WikiArt Classifier") as demo:
     gr.Markdown(
-        "Upload a painting to get top-3 predictions for **genre**, **style**, and **artist**.\n\n"
-        "If the model repo is private or the repo id is wrong, you’ll see an error JSON instead of the Space crashing."
+        "## Arty — WikiArt painting classifier\n"
+        "Upload a painting to get genre, style and artist predictions."
     )
-    model_choice = gr.Dropdown(
-        label="Model",
-        choices=["CNN baseline", "CNN-RNN (BiLSTM)"],
-        value="CNN baseline",
-    )
-    repo = gr.Textbox(
-        label="Override model repo id (optional)",
-        value="",
-        placeholder="Leave blank to use the selected model above (e.g. pdjota/arty-cnn-baseline)",
-    )
-    img = gr.Image(type="pil", label="Upload a painting")
-    summary = gr.Markdown()
-    with gr.Accordion("Details (top-3 + debug)", open=True):
-        out = gr.JSON(label="Predictions")
+    with gr.Row():
+        model_choice = gr.Dropdown(
+            choices=["CNN baseline", "CNN-RNN (BiLSTM)"],
+            value="CNN baseline",
+            label="Model",
+        )
+    img = gr.Image(type="pil", label="Painting")
     btn = gr.Button("Predict")
-    btn.click(fn=predict, inputs=[model_choice, repo, img], outputs=[summary, out])
+    summary_md = gr.Markdown(label="Predictions")
+    with gr.Accordion("Details (top-3 JSON)", open=True):
+        details_box = gr.Textbox(label="", lines=15, interactive=False)
 
+    btn.click(fn=predict, inputs=[model_choice, img], outputs=[summary_md, details_box])
 
 if __name__ == "__main__":
-    # Spaces currently runs Gradio with SSR enabled by default; disable to avoid
-    # asyncio event-loop teardown warnings in some runtimes.
-    demo.launch(ssr_mode=False)
-
+    demo.launch()

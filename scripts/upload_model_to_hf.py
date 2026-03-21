@@ -17,9 +17,12 @@ from pathlib import Path
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+from config import checkpoint_dir_for_arch  # noqa: E402
+
 DATA_DIR = ROOT / "data"
 INDEX_SELECTED = DATA_DIR / "wikiart_index_selected.csv"
-CHECKPOINT_DEFAULT = ROOT / "checkpoints" / "best.pt"
+CHECKPOINT_DEFAULT = checkpoint_dir_for_arch("cnn") / "best.pt"
 
 
 def build_id2label_from_selected_index(index_path: Path) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
@@ -100,7 +103,12 @@ def upload_checkpoint_and_labels(
 def main() -> None:
     p = argparse.ArgumentParser(description="Upload model checkpoint + id2label JSONs to Hugging Face Hub")
     p.add_argument("--repo-id", required=True, help="Model repo id, e.g. username/arty-cnn-baseline")
-    p.add_argument("--checkpoint", type=Path, default=CHECKPOINT_DEFAULT, help="Checkpoint path (default: checkpoints/best.pt)")
+    p.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=CHECKPOINT_DEFAULT,
+        help=f"Checkpoint path (default: {CHECKPOINT_DEFAULT})",
+    )
     p.add_argument("--token", default=None, help="HF token (default: HF_TOKEN env)")
     p.add_argument("--index", type=Path, default=INDEX_SELECTED, help="Selected index CSV (default: data/wikiart_index_selected.csv)")
     p.add_argument("--export-labels-dir", type=Path, default=None, help="Optional dir to write *_id2label.json locally")

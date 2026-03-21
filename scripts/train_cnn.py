@@ -6,7 +6,7 @@ Usage: python scripts/train_cnn.py [--arch cnn|cnnrnn] [--epochs N] [--resume] [
   --batch-size N: default 64; use 16 or 32 if MPS OOM on Mac.
   --cpu: force CPU (avoids MPS out-of-memory on Apple Silicon).
 
-Persistence (all under checkpoints/):
+Persistence (under checkpoints/<run>/; see config.checkpoint_dir_for_arch):
   - last.pt: latest epoch (model + optimizer) — used by --resume.
   - best.pt: epoch with lowest val_loss — use for eval.
   - train_log.csv: one row per epoch (loss + acc); append-only.
@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from config import (
     INDEX_SELECTED,
     WIKIART_ROOT,
-    CHECKPOINT_DIR,
+    checkpoint_dir_for_arch,
     N_STYLE,
     N_ARTIST,
     N_GENRE,
@@ -109,8 +109,9 @@ def main() -> None:
         device = torch.device("cpu")
     batch_size = args.batch_size if args.batch_size is not None else BATCH_SIZE
     print(f"[{now_ts()}] [device] Using device={device} (args.cpu={args.cpu})")
-    ckpt_dir = CHECKPOINT_DIR / args.arch
+    ckpt_dir = checkpoint_dir_for_arch(args.arch)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[{now_ts()}] [checkpoint dir] {ckpt_dir}")
 
     df = pd.read_csv(INDEX_SELECTED)
     print(f"[{now_ts()}] [1/5] Loaded index: {len(df):,} rows from {INDEX_SELECTED.name}")
@@ -178,7 +179,7 @@ def main() -> None:
     print(f"[{now_ts()}] [4/5] Model and optimizer ready. Scheduler: CosineAnnealingLR (T_max={total_steps})")
 
     def _log_next_steps() -> None:
-        print("\n--- Persistence (checkpoints/) ---")
+        print("\n--- Persistence (checkpoint dir) ---")
         print(f"  arch dir    = {ckpt_dir}")
         print("  last.pt     = latest epoch (for --resume)")
         print("  best.pt     = best val_loss (for eval)")
@@ -324,7 +325,6 @@ def main() -> None:
         _log_next_steps()
 
     # Save best-val results summary
-    best_ckpt_path = CHECKPOINT_DIR / "best.pt"
     best_ckpt_path = ckpt_dir / "best.pt"
     if best_ckpt_path.exists():
         best_ckpt = torch.load(best_ckpt_path, map_location="cpu")

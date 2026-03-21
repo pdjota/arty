@@ -1,4 +1,7 @@
 """Paths and constants for CNN training from selected index."""
+from __future__ import annotations
+
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -6,6 +9,25 @@ DATA_DIR = ROOT / "data"
 WIKIART_ROOT = DATA_DIR / "wikiart"
 INDEX_SELECTED = DATA_DIR / "wikiart_index_selected.csv"
 CHECKPOINT_DIR = ROOT / "checkpoints"
+
+# Default subdirs under checkpoints/ (best.pt, last.pt, train_log.csv, results_summary.csv).
+# Override with env: ARTY_CHECKPOINT_CNN_DIR / ARTY_CHECKPOINT_CNNRNN_DIR (relative to checkpoints/, e.g. "cnn/mar17").
+_DEFAULT_CKPT_SUBDIR: dict[str, str] = {"cnn": "cnn_baseline", "cnnrnn": "cnnrnn"}
+_ENV_CKPT: dict[str, str] = {
+    "cnn": "ARTY_CHECKPOINT_CNN_DIR",
+    "cnnrnn": "ARTY_CHECKPOINT_CNNRNN_DIR",
+}
+
+
+def checkpoint_dir_for_arch(arch: str) -> Path:
+    """Directory for a given architecture's training artifacts."""
+    a = arch.lower()
+    if a not in _DEFAULT_CKPT_SUBDIR:
+        raise ValueError(f"Unknown arch {arch!r}; expected 'cnn' or 'cnnrnn'")
+    rel = os.environ.get(_ENV_CKPT[a], "").strip()
+    if not rel:
+        rel = _DEFAULT_CKPT_SUBDIR[a]
+    return (CHECKPOINT_DIR / rel).resolve()
 
 # Class counts (ArtGAN)
 N_STYLE = 27

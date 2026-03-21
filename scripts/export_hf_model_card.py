@@ -23,6 +23,7 @@ from eval_cnn import EvalMetrics, compute_test_metrics  # noqa: E402
 def render_model_card(
     m: EvalMetrics,
     *,
+    arch: str,
     model_index_name: str,
     dataset_id: str,
     source_name: str,
@@ -34,6 +35,20 @@ def render_model_card(
     g, s, a, a5 = m["genre_top1"], m["style_top1"], m["artist_top1"], m["artist_top5"]
     epoch = m["epoch"]
     epoch_str = repr(epoch) if epoch is not None else "unknown"
+
+    if arch == "cnnrnn":
+        extra_tags = "\n  - lstm\n  - bilstm"
+        intro = (
+            f"Multi-head **ResNet-50** backbone with **column pooling**, a **bidirectional LSTM** over spatial strips, "
+            f"and linear heads for **genre**, **style**, and **artist** on a WikiArt subset "
+            f"([{dataset_id}](https://huggingface.co/datasets/{dataset_id}))."
+        )
+    else:
+        extra_tags = ""
+        intro = (
+            f"Multi-head **ResNet-50** classifier: **genre**, **style**, and **artist** on a WikiArt subset "
+            f"([{dataset_id}](https://huggingface.co/datasets/{dataset_id}))."
+        )
 
     yaml = f"""---
 license: {license_id}
@@ -49,7 +64,7 @@ tags:
   - image-classification
   - multi-task
   - wikiart
-  - art
+  - art{extra_tags}
 
 model-index:
   - name: {model_index_name}
@@ -79,7 +94,7 @@ model-index:
 
 # {model_index_name}
 
-Multi-head **ResNet-50** classifier: **genre**, **style**, and **artist** on a WikiArt subset ([{dataset_id}](https://huggingface.co/datasets/{dataset_id})).
+{intro}
 
 ## Evaluation (test split)
 
@@ -107,8 +122,8 @@ def main() -> None:
     p.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "docs" / "hf_model_card_cnn_baseline.md",
-        help="Where to write README content (copy to Hub model repo as README.md)",
+        default=None,
+        help="Where to write README (default: docs/hf_model_card_cnn_baseline.md or ..._arty_cnn_rnn.md by --arch)",
     )
     p.add_argument("--model-name", default="Arty CNN baseline", help="model-index name + H1 title")
     p.add_argument("--dataset", default="pdjota/artyset", help="Hub dataset id")
@@ -122,6 +137,14 @@ def main() -> None:
     )
     args = p.parse_args()
 
+    out = args.output
+    if out is None:
+        default_out = {
+            "cnn": ROOT / "docs" / "hf_model_card_cnn_baseline.md",
+            "cnnrnn": ROOT / "docs" / "hf_model_card_arty_cnn_rnn.md",
+        }
+        out = default_out[args.arch]
+
     try:
         m = compute_test_metrics(arch=args.arch, last=args.last)
     except FileNotFoundError as e:
@@ -131,6 +154,7 @@ def main() -> None:
     source_url = args.source_url.strip() or "https://huggingface.co/docs/hub/model-cards"
     text = render_model_card(
         m,
+        arch=args.arch,
         model_index_name=args.model_name,
         dataset_id=args.dataset,
         source_name=args.source_name,
@@ -138,9 +162,9 @@ def main() -> None:
         license_id=args.license_id,
         extra_body=args.extra_body,
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(text, encoding="utf-8")
-    print(f"Wrote {args.output} ({len(text)} bytes)")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    print(f"Wrote {out} ({len(text)} bytes)")
 
 
 if __name__ == "__main__":

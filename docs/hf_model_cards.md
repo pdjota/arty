@@ -16,8 +16,10 @@ Then copy the file to your model repository as **`README.md`** (or merge the YAM
 
 Options: `--model-name`, `--dataset`, `--source-url`, `--license`, `--extra-body`.
 
-CNN-RNN example:
+CNN-RNN example (default output `docs/hf_model_card_arty_cnn_rnn.md`):
 
 ```bash
-python scripts/export_hf_model_card.py --arch cnnrnn --model-name "Arty CNN-RNN" --output docs/hf_model_card_cnn_rnn.md
+python scripts/export_hf_model_card.py --arch cnnrnn --model-name "Arty CNN-RNN"
 ```
+
+Reads `checkpoints/cnnrnn/best.pt` by default (override with `ARTY_CHECKPOINT_CNNRNN_DIR`).

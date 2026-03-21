@@ -13,4 +13,5 @@ pytest>=7.0          # tests
 pytest-cov>=4.0      # coverage
 
 # Gradio demo (HF Space uses root requirements.txt)
-gradio>=5.0,<6
+# 5.50+ includes gradio_client fix for Pydantic 2.11 JSON Schema (additionalProperties bool) /api crash
+gradio>=5.50,<6

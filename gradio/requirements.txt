@@ -3,4 +3,5 @@ torch>=2.0
 torchvision>=0.15
 Pillow>=10.0
 huggingface_hub>=0.25.0,<1.0
-gradio>=5.0,<6
+# 5.50+ includes gradio_client fix for Pydantic 2.11 JSON Schema (additionalProperties bool) /api crash
+gradio>=5.50,<6

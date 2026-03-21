@@ -1,19 +1,8 @@
----
-title: Artydemo
-emoji: 🦀
-colorFrom: purple
-colorTo: gray
-sdk: gradio
-sdk_version: "5.0.0"
-python_version: "3.11"
-app_file: gradio/app.py
-pinned: false
----
-
 # Arty Gradio demo (monorepo)
 
-- Set **`app_file`** to **`gradio/app.py`** (see YAML above).
-- The build must include **`src/model.py`** (architecture) while **weights** load from Hub model repos.
+Hugging Face reads **Space SDK settings from the repo root** [`README.md`](../README.md) (`sdk: gradio`, `app_file: gradio/app.py`). If the root README used `sdk: docker`, the Space would **not** run this app.
+
+The build must include **`src/model.py`** (architecture) while **weights** load from Hub model repos.
 
 ## Local run
 
@@ -33,7 +22,7 @@ python app.py
 ## Hugging Face Space checklist
 
 1. Space **linked repo** = your Arty **monorepo** (GitHub or HF Git).
-2. **Root** `requirements.txt` is optional; if missing, Space uses **`gradio/requirements.txt`** when the app is under `gradio/` (or add a root `requirements.txt` that `-r gradio/requirements.txt`).
+2. **Root** [`requirements.txt`](../requirements.txt) must include Gradio deps (this repo adds `gradio` there for the Space build).
 3. Migrate off the old Space submodule: use **one repo** + `app_file: gradio/app.py`.
 
 See also **[docs/gradio_space_fix_options.md](../docs/gradio_space_fix_options.md)**.

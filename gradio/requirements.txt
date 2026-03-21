@@ -1,0 +1,6 @@
+# Minimal deps to run the Gradio demo from ./gradio (repo ../src still required).
+torch>=2.0
+torchvision>=0.15
+Pillow>=10.0
+huggingface_hub>=0.25.0,<1.0
+gradio>=5.0,<6

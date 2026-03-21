@@ -1,0 +1,3 @@
+# Hugging Face Gradio Space: install deps for gradio/app.py (monorepo).
+# Point the Space "requirements" field to this file, or merge into root requirements.txt.
+-r gradio/requirements.txt

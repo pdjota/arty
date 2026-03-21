@@ -33,6 +33,7 @@ def test_render_model_card_contains_metrics_yaml() -> None:
     }
     text = mod.render_model_card(
         m,  # type: ignore[arg-type]
+        arch="cnn",
         model_index_name="Test Model",
         dataset_id="pdjota/artyset",
         source_name="unit test",

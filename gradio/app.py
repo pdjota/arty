@@ -35,7 +35,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from model import ResNet50BiLSTMThreeHeads  # type: ignore
 from model import ResNet50ThreeHeads  # type: ignore
 
-BASELINE_REPO = os.environ.get("BASELINE_MODEL_REPO_ID", "pdjota/arty-cnn-baseline")
+BASELINE_REPO = os.environ.get("BASELINE_MODEL_REPO_ID", "pdjota/cnn-baseline")
 CNNRNN_REPO = os.environ.get("CNNRNN_MODEL_REPO_ID", "pdjota/arty-cnn-rnn")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 HF_TOKEN = os.environ.get("HF_TOKEN")

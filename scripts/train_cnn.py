@@ -90,6 +90,27 @@ def now_ts() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _scheduler_for_resume_legacy(
+    optimizer: torch.optim.Optimizer,
+    ckpt: dict,
+    cosine_t_max: int,
+    batches_per_epoch: int,
+) -> torch.optim.lr_scheduler.CosineAnnealingLR:
+    """Approximate cosine step count for checkpoints saved before `scheduler_state_dict` existed."""
+    for g in optimizer.param_groups:
+        g.setdefault("initial_lr", g["lr"])
+    e = int(ckpt.get("epoch", -1))
+    if e < 0:
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_t_max)
+    if ckpt.get("interrupted"):
+        b = int(ckpt.get("batch_in_epoch") or 0)
+        done = e * batches_per_epoch + max(0, b)
+    else:
+        done = (e + 1) * batches_per_epoch
+    last = min(max(done - 1, -1), cosine_t_max - 1)
+    return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_t_max, last_epoch=last)
+
+
 def main() -> None:
     if not INDEX_SELECTED.exists():
         print(f"[{now_ts()}] ERROR: {INDEX_SELECTED} not found. Run scripts/build_artgan_index.py first.")
@@ -142,6 +163,7 @@ def main() -> None:
     best_val_loss = float("inf")
     resume_path = ckpt_dir / "last.pt"
 
+    ckpt: dict | None = None
     if args.resume and resume_path.exists():
         try:
             ckpt = torch.load(resume_path, map_location=device, weights_only=False)
@@ -155,7 +177,7 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-        start_epoch = ckpt["epoch"] + 1
+        start_epoch = int(ckpt["epoch"]) + 1
         best_val_loss = ckpt.get("val_loss", float("inf"))
         extra = args.epochs if args.epochs is not None else 10
         total_epochs_this_run = extra
@@ -189,14 +211,31 @@ def main() -> None:
         momentum=MOMENTUM,
         weight_decay=WEIGHT_DECAY,
     )
-    if args.resume and resume_path.exists():
+    if args.resume and resume_path.exists() and ckpt is not None:
         model.load_state_dict(ckpt["model_state_dict"])
         if "optimizer_state_dict" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
 
-    total_steps = total_epochs_this_run * len(train_loader)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
-    print(f"[{now_ts()}] [4/5] Model and optimizer ready. Scheduler: CosineAnnealingLR (T_max={total_steps})")
+    # One cosine over the full Zhao-style horizon (optimizer steps), not just this CLI chunk — survives --resume.
+    cosine_t_max = (EPOCHS + COOLDOWN_EPOCHS) * len(train_loader)
+    if args.resume and ckpt is not None and "scheduler_state_dict" in ckpt:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_t_max)
+        try:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        except Exception as e:
+            print(f"[{now_ts()}] WARNING: Could not load scheduler state ({e}); reinitializing LR schedule from epoch.")
+            scheduler = _scheduler_for_resume_legacy(optimizer, ckpt, cosine_t_max, len(train_loader))
+    elif args.resume and ckpt is not None:
+        scheduler = _scheduler_for_resume_legacy(optimizer, ckpt, cosine_t_max, len(train_loader))
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_t_max)
+
+    sched_step = getattr(scheduler, "last_epoch", -1) + 1
+    print(
+        f"[{now_ts()}] [4/5] Model and optimizer ready. "
+        f"Scheduler: CosineAnnealingLR (T_max={cosine_t_max} steps ≈ {EPOCHS}+{COOLDOWN_EPOCHS} epochs × batches; "
+        f"next step index {sched_step})"
+    )
 
     def _log_next_steps() -> None:
         print("\n--- Persistence (checkpoint dir) ---")
@@ -286,6 +325,7 @@ def main() -> None:
                 "arch": args.arch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
                 "val_loss": val_loss,
                 "val_genre_acc": acc_g,
                 "val_style_acc": acc_s,
@@ -323,6 +363,7 @@ def main() -> None:
             "arch": args.arch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
             "val_loss": None,
             "val_genre_acc": None,
             "val_style_acc": None,

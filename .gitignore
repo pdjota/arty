@@ -33,7 +33,7 @@ htmlcov/
 
 # Exclude from commit
 Arty.ipynb
-plan.md
+.cursor/plans/
 
 # IDE & OS
 .idea/

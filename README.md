@@ -14,7 +14,7 @@ pinned: false
 
 **Arty** is an example solution of the [Painting in a Painting](https://humanai.foundation/gsoc/2024/proposal_PaintingInAPainting.html) proposal for Google Summer of Code 2026. It is a limited multi-task WikiArt classifier: **genre**, **style**, and **artist** in one model with two architectures — a **CNN baseline** (ResNet-50 + global pooling + three heads) and a **CNN–RNN** (same backbone, **bidirectional long short-term memory (BiLSTM)** over spatial features + three heads). This Hugging Face **Space** runs the **Gradio** app in [`gradio/app.py`](gradio/app.py); **weights** load from Hub model repos and **architecture** from [`src/model.py`](src/model.py). Each architecture corresponds to a model: [pdjota/cnn-baseline](https://huggingface.co/pdjota/cnn-baseline) or [pdjota/arty-cnn-rnn](https://huggingface.co/pdjota/arty-cnn-rnn).
 
-**Training:** run [`scripts/train_cnn.py`](scripts/train_cnn.py) locally (CPU / MPS / CUDA). Optional GPU **Docker** workflow: see comments in [`Dockerfile`](Dockerfile). This Space contains a **`sdk: gradio`** for the demo of the model.
+**Training:** run [`scripts/train_cnn.py`](scripts/train_cnn.py) locally (CPU / MPS / CUDA). This Space uses **`sdk: gradio`** for the demo.
 
 ## Limitations
 
@@ -22,7 +22,9 @@ pinned: false
 - **Closed label set** — genre, style, and artist heads are trained on a fixed **ArtGAN-aligned** taxonomy ([`pdjota/artyset`](https://huggingface.co/datasets/pdjota/artyset)). Artists, styles, or genres outside that set are **not represented**; predictions are always one of the trained classes.
 - **Domain** — models are tuned for **catalogue-style paintings** in the index. Scans, photos of art, sketches, digital pieces, or strong domain shift may behave unpredictably.
 - **Metrics** — reported accuracies are on a **held-out test split** from the same distribution as training; real-world performance varies. Top-k scores are **not** calibrated probabilities of “being authentic.”
-- **Hardware** — large batches or the CNN–RNN can **OOM** on small GPUs or Apple Silicon; reduce `--batch-size` or use `--cpu` as documented in `train_cnn.py`. The models uploaded to Hugging Face have minimal training below the recommendations of Zhao et al at this time.
+- **Hardware** — large batches or the CNN–RNN can **OOM** on small GPUs or Apple Silicon; reduce `--batch-size` or use `--cpu` as documented in `train_cnn.py`.
+
+__Note__: The models uploaded to Hugging Face have minimal training below the recommendations of Zhao et al at this time.
 
 ## Documentation
 

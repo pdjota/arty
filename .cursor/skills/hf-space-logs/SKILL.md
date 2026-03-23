@@ -3,7 +3,7 @@ name: hf-space-logs
 description: >-
   Streams Hugging Face Space runtime logs over the Hub HTTP API using HF_TOKEN.
   Use when checking arty-train-cnnrnn (or any Space) build/run output, debugging
-  Docker training failures, or when the user asks for Space logs, HF logs, or
+  GPU Space or training-job failures, or when the user asks for Space logs, HF logs, or
   Hugging Face Space monitoring.
 ---
 

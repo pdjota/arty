@@ -1,6 +1,6 @@
 # Arty Gradio demo (monorepo)
 
-Hugging Face reads **Space SDK settings from the repo root** [`README.md`](../README.md) (`sdk: gradio`, `app_file: gradio/app.py`). If the root README used `sdk: docker`, the Space would **not** run this app.
+Hugging Face reads **Space SDK settings from the repo root** [`README.md`](../README.md): use **`sdk: gradio`** and **`app_file: gradio/app.py`** so this demo builds and runs.
 
 The build must include **`src/model.py`** (architecture) while **weights** load from Hub model repos.
 

@@ -8,4 +8,4 @@
 | [hf_model_card_arty_cnn_rnn.md](hf_model_card_arty_cnn_rnn.md) | Exported card template (CNN–RNN). |
 | [monorepo_gradio_space.md](monorepo_gradio_space.md) | Hugging Face Gradio Space: repo layout, `app_file`, env vars. |
 
-Training with Docker is optional; see comments in the repo root **`Dockerfile`** and `scripts/train_cnn.py`.
+Training: `scripts/train_cnn.py` (CPU / MPS / CUDA).

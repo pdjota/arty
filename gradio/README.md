@@ -25,4 +25,4 @@ python app.py
 2. **Root** [`requirements.txt`](../requirements.txt) must include Gradio deps (this repo adds `gradio` there for the Space build).
 3. Migrate off the old Space submodule: use **one repo** + `app_file: gradio/app.py`.
 
-See also **[docs/gradio_space_fix_options.md](../docs/gradio_space_fix_options.md)**.
+See also **[docs/monorepo_gradio_space.md](../docs/monorepo_gradio_space.md)**.

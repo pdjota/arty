@@ -12,15 +12,28 @@ pinned: false
 
 # Arty
 
-**Arty** is a multi-task WikiArt classifier: **genre**, **style**, and **artist** in one model with two architectures — a **CNN baseline** (ResNet-50 + global pooling + three heads) and a **CNN–RNN** (same backbone, **bidirectional long short-term memory (BiLSTM)** over spatial features + three heads). This Hugging Face **Space** runs the **Gradio** app in [`gradio/app.py`](gradio/app.py); **weights** load from Hub model repos and **architecture** from [`src/model.py`](src/model.py). Each architecuture corresponds to a model: [pdjota/cnn-baseline](https://huggingface.co/pdjota/cnn-baseline) or [pdjota/arty-cnn-rnn](https://huggingface.co/pdjota/arty-cnn-rnn)
+**Arty** is an example solution of the [Painting in a Painting](https://humanai.foundation/gsoc/2024/proposal_PaintingInAPainting.html) proposal for Google Summer of Code 2026. It is a limited multi-task WikiArt classifier: **genre**, **style**, and **artist** in one model with two architectures — a **CNN baseline** (ResNet-50 + global pooling + three heads) and a **CNN–RNN** (same backbone, **bidirectional long short-term memory (BiLSTM)** over spatial features + three heads). This Hugging Face **Space** runs the **Gradio** app in [`gradio/app.py`](gradio/app.py); **weights** load from Hub model repos and **architecture** from [`src/model.py`](src/model.py). Each architecture corresponds to a model: [pdjota/cnn-baseline](https://huggingface.co/pdjota/cnn-baseline) or [pdjota/arty-cnn-rnn](https://huggingface.co/pdjota/arty-cnn-rnn).
 
-**Training** (Docker GPU job) lives in [`Dockerfile`](Dockerfile) — use a **separate** Space pointed at the same repo if you only want training, or run locally. Do not set `sdk: docker` on this Space if you want the Gradio UI.
+**Training:** run [`scripts/train_cnn.py`](scripts/train_cnn.py) locally (CPU / MPS / CUDA). Optional GPU **Docker** workflow: see comments in [`Dockerfile`](Dockerfile). This Space contains a **`sdk: gradio`** for the demo of the model.
+
+## Limitations
+
+- **Not for production attribution, forensic identification, or legal evidence** — research and demo use only; outputs are not certified provenance.
+- **Closed label set** — genre, style, and artist heads are trained on a fixed **ArtGAN-aligned** taxonomy ([`pdjota/artyset`](https://huggingface.co/datasets/pdjota/artyset)). Artists, styles, or genres outside that set are **not represented**; predictions are always one of the trained classes.
+- **Domain** — models are tuned for **catalogue-style paintings** in the index. Scans, photos of art, sketches, digital pieces, or strong domain shift may behave unpredictably.
+- **Metrics** — reported accuracies are on a **held-out test split** from the same distribution as training; real-world performance varies. Top-k scores are **not** calibrated probabilities of “being authentic.”
+- **Hardware** — large batches or the CNN–RNN can **OOM** on small GPUs or Apple Silicon; reduce `--batch-size` or use `--cpu` as documented in `train_cnn.py`. The models uploaded to Hugging Face have minimal training below the recommendations of Zhao et al at this time.
+
+## Documentation
+
+- **[`docs/README.md`](docs/README.md)** — index of project docs (checkpoints, Hub model cards, Space layout).
+- **[`gradio/README.md`](gradio/README.md)** — running and configuring the Gradio demo.
 
 ## About this project
 
 ### Classification with three labels together
 
-**Genre** and **style** are relatively **generic**: many paintings share the same movement or subject category, and the model learns broad visual patterns that match those labels. **Artist** is **more specific** — we usually think of *who* painted it **within** a stylistic movement. Distinguishing painters who share a movement like Sisley and Monet in the impressionist movement or identifying Picasso who create a different set of paitings in symbolism or cubism become challenging. The network must pick up **fine-grained** cues (palette, brushwork, recurring motifs) that sit on top of the same broad visual cues that support style and genre.
+**Genre** and **style** are relatively **generic**: many paintings share the same movement or subject category, and the model learns broad visual patterns that match those labels. **Artist** is **more specific** — we usually think of *who* painted it **within** a stylistic movement. Distinguishing painters who share a movement like Sisley and Monet in the impressionist movement or identifying Picasso across different periods in symbolism or cubism becomes challenging.
 
 We use a **shared convolutional trunk** (one set of image features) and **three separate heads** (genre, style, artist). The trunk carries **generic** painting features; the heads split **coarse** (genre, style) vs **fine** (artist) decisions so the artist task can specialize without forcing a single output to encode everything at once.
 
@@ -62,8 +75,6 @@ Runs save **PyTorch** checkpoints (`best.pt`, `last.pt`), **CSV** logs (`train_l
 - `BASELINE_MODEL_REPO_ID` — default `pdjota/cnn-baseline`
 - `CNNRNN_MODEL_REPO_ID` — default `pdjota/arty-cnn-rnn`
 - `HF_TOKEN` — if model repos are gated
-
-More detail: [`gradio/README.md`](gradio/README.md), [`docs/monorepo_gradio_space.md`](docs/monorepo_gradio_space.md), research plan [`plan.md`](plan.md).
 
 ### References (ResNet / transfer / WikiArt)
 

@@ -1,6 +1,7 @@
 """Tests for scripts/upload_model_to_hf.py"""
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -14,6 +15,24 @@ spec = importlib.util.spec_from_file_location("upload_model_to_hf", SCRIPT)
 mod = importlib.util.module_from_spec(spec)
 sys.modules["upload_model_to_hf"] = mod
 spec.loader.exec_module(mod)
+
+
+def test_load_dotenv_from_repo_sets_hf_token(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    (tmp_path / ".env").write_text("HF_TOKEN=fake_from_dotenv\n", encoding="utf-8")
+    with patch.object(mod, "ROOT", tmp_path):
+        mod._load_dotenv_from_repo()
+
+    assert os.environ.get("HF_TOKEN") == "fake_from_dotenv"
+
+
+def test_load_dotenv_from_repo_overrides_stale_hf_token(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "stale_wrong_token")
+    (tmp_path / ".env").write_text("HF_TOKEN=good_from_dotenv\n", encoding="utf-8")
+    with patch.object(mod, "ROOT", tmp_path):
+        mod._load_dotenv_from_repo()
+
+    assert os.environ.get("HF_TOKEN") == "good_from_dotenv"
 
 
 def test_build_id2label_from_selected_index(tmp_path: Path) -> None:

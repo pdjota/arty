@@ -1,28 +1,41 @@
 """
-Upload a trained checkpoint to the Hugging Face Hub (model repo) and (optionally)
-export id→label JSON files locally.
+Upload a trained checkpoint and id→label JSONs to a Hugging Face model repo (for Spaces / demos).
 
-The Space/demo code uses these JSONs to turn predicted class indices into readable labels.
+Usage (repo root):
 
-Usage:
-  HF_TOKEN=... python scripts/upload_model_to_hf.py --repo-id USERNAME/arty-cnn-baseline
-  HF_TOKEN=... python scripts/upload_model_to_hf.py --repo-id USERNAME/arty-cnn-baseline --export-labels-dir data/label_maps
+  python scripts/upload_model_to_hf.py --repo-id USER/reponame --checkpoint PATH/TO/best.pt
+
+`HF_TOKEN`: repo `.env` (python-dotenv) wins over an existing shell `HF_TOKEN` when the key appears in `.env`
+(`load_dotenv(..., override=True)`). Use a token with **write** access to the model repo. Local labels: `data/label_maps/`.
 """
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 import torch
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "src"))
-from config import checkpoint_dir_for_arch  # noqa: E402
+
+
+def _load_dotenv_from_repo() -> None:
+    """Load repo `.env` into os.environ. Keys in `.env` override the same keys already in the environment
+    (fixes stale HF_TOKEN from the shell or IDE masking a valid token in `.env`)."""
+    env_path = ROOT / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(env_path, override=True)
+
 
 DATA_DIR = ROOT / "data"
 INDEX_SELECTED = DATA_DIR / "wikiart_index_selected.csv"
-CHECKPOINT_DEFAULT = checkpoint_dir_for_arch("cnn") / "best.pt"
+LABEL_EXPORT_DEFAULT = DATA_DIR / "label_maps"
 
 
 def build_id2label_from_selected_index(index_path: Path) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
@@ -101,22 +114,34 @@ def upload_checkpoint_and_labels(
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Upload model checkpoint + id2label JSONs to Hugging Face Hub")
+    _load_dotenv_from_repo()
+
+    p = argparse.ArgumentParser(
+        description="Upload model checkpoint + id2label JSONs to Hugging Face Hub. "
+        "Loads repo-root .env by default (HF_TOKEN) when python-dotenv is installed."
+    )
     p.add_argument("--repo-id", required=True, help="Model repo id, e.g. username/arty-cnn-baseline")
     p.add_argument(
         "--checkpoint",
         type=Path,
-        default=CHECKPOINT_DEFAULT,
-        help=f"Checkpoint path (default: {CHECKPOINT_DEFAULT})",
+        required=True,
+        help="Checkpoint file to upload (e.g. checkpoints/cnn_baseline/best.pt or checkpoints/cnnrnn/best.pt)",
     )
-    p.add_argument("--token", default=None, help="HF token (default: HF_TOKEN env)")
     p.add_argument("--index", type=Path, default=INDEX_SELECTED, help="Selected index CSV (default: data/wikiart_index_selected.csv)")
-    p.add_argument("--export-labels-dir", type=Path, default=None, help="Optional dir to write *_id2label.json locally")
+    p.add_argument(
+        "--export-labels-dir",
+        type=Path,
+        default=LABEL_EXPORT_DEFAULT,
+        help=f"Write *_id2label.json here (default: {LABEL_EXPORT_DEFAULT})",
+    )
     args = p.parse_args()
 
-    token = args.token or __import__("os").environ.get("HF_TOKEN")
+    token = os.environ.get("HF_TOKEN")
     if not token:
-        print("Set HF_TOKEN or pass --token", file=sys.stderr)
+        print(
+            "Missing token: add HF_TOKEN to repo-root .env",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # quick sanity load of checkpoint format

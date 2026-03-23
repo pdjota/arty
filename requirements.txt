@@ -9,6 +9,7 @@ scikit-learn>=1.2
 matplotlib>=3.7
 tqdm>=4.65
 huggingface_hub>=0.25.0,<1.0  # Gradio 5.x needs HfFolder; removed in hub 1.0
+python-dotenv>=1.0   # optional: HF_TOKEN from repo .env for upload scripts
 pytest>=7.0          # tests
 pytest-cov>=4.0      # coverage
 

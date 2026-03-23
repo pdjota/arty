@@ -26,6 +26,15 @@ from torchvision import transforms as T
 from sklearn.model_selection import train_test_split
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _atomic_torch_save(obj: object, path: Path) -> None:
+    """Write `path` via a temp file + `os.replace` so a kill mid-write does not truncate `last.pt` / `best.pt`."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(obj, tmp)
+    os.replace(tmp, path)
 sys.path.insert(0, str(ROOT / "src"))
 
 from config import (
@@ -134,7 +143,18 @@ def main() -> None:
     resume_path = ckpt_dir / "last.pt"
 
     if args.resume and resume_path.exists():
-        ckpt = torch.load(resume_path, map_location=device)
+        try:
+            ckpt = torch.load(resume_path, map_location=device, weights_only=False)
+        except Exception as e:
+            print(
+                f"[{now_ts()}] ERROR: Cannot load {resume_path} (often a truncated file if the process was killed "
+                f"during `torch.save`).\n"
+                f"  {e}\n"
+                f"  Fix: if best.pt is intact, copy it over last.pt and resume, e.g.\n"
+                f"    cp {ckpt_dir / 'best.pt'} {resume_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         start_epoch = ckpt["epoch"] + 1
         best_val_loss = ckpt.get("val_loss", float("inf"))
         extra = args.epochs if args.epochs is not None else 10
@@ -275,9 +295,9 @@ def main() -> None:
                 "n_style": N_STYLE,
                 "n_artist": N_ARTIST,
             }
-            torch.save(ckpt, ckpt_dir / "last.pt")
+            _atomic_torch_save(ckpt, ckpt_dir / "last.pt")
             if is_best:
-                torch.save(ckpt, ckpt_dir / "best.pt")
+                _atomic_torch_save(ckpt, ckpt_dir / "best.pt")
 
             log_row = {
                 "epoch": epoch,
@@ -315,7 +335,7 @@ def main() -> None:
             "batch_in_epoch": current_batch_in_epoch,
             "num_batches_in_epoch": current_num_batches_in_epoch,
         }
-        torch.save(interrupted_ckpt, ckpt_dir / "last.pt")
+        _atomic_torch_save(interrupted_ckpt, ckpt_dir / "last.pt")
         print(
             "\n"
             f"[{now_ts()}] Stopped by user (Ctrl+C). Saved resumable checkpoint to "
@@ -327,7 +347,7 @@ def main() -> None:
     # Save best-val results summary
     best_ckpt_path = ckpt_dir / "best.pt"
     if best_ckpt_path.exists():
-        best_ckpt = torch.load(best_ckpt_path, map_location="cpu")
+        best_ckpt = torch.load(best_ckpt_path, map_location="cpu", weights_only=False)
         summary = {
             "best_epoch": best_ckpt.get("epoch"),
             "val_loss": best_ckpt.get("val_loss"),

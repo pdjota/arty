@@ -18,7 +18,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 import torch
-import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
 from PIL import Image
 from torchvision import transforms as T
@@ -32,12 +31,19 @@ if not _SRC.exists():
     )
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from config import IMAGENET_MEAN, IMAGENET_STD  # type: ignore
 from model import ResNet50BiLSTMThreeHeads  # type: ignore
 from model import ResNet50ThreeHeads  # type: ignore
+from predict_format import topk_tuples_to_ui_items  # type: ignore
 
 BASELINE_REPO = os.environ.get("BASELINE_MODEL_REPO_ID", "pdjota/cnn-baseline")
 CNNRNN_REPO = os.environ.get("CNNRNN_MODEL_REPO_ID", "pdjota/arty-cnn-rnn")
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
+else:
+    DEVICE = torch.device("cpu")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 transform = T.Compose(
@@ -45,7 +51,7 @@ transform = T.Compose(
         T.Resize(256),
         T.CenterCrop(224),
         T.ToTensor(),
-        T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
     ]
 )
 
@@ -109,11 +115,6 @@ def _load(repo_id: str) -> Dict[str, Any]:
 
 # --- prediction helpers ----------------------------------------------------
 
-def _topk(logits: torch.Tensor, id2label: Dict[int, str], k: int = 3) -> List[Dict[str, Any]]:
-    probs = F.softmax(logits, dim=-1)[0]
-    vals, idxs = probs.topk(k)
-    return [{"label": id2label.get(int(i), str(int(i))), "prob": round(float(v), 4)} for v, i in zip(vals, idxs)]
-
 
 def _bucket(pct: float) -> str:
     if pct >= 80:
@@ -151,12 +152,16 @@ def predict(model_choice: str, image: Optional[Image.Image]) -> Tuple[str, str]:
         model = assets["model"]
 
         x = transform(image).unsqueeze(0).to(DEVICE)
-        with torch.no_grad():
-            lg, ls, la = model(x)
-
-        g3 = _topk(lg, assets["genre"])
-        s3 = _topk(ls, assets["style"])
-        a3 = _topk(la, assets["artist"])
+        g_t, s_t, a_t = model.predict_topk(
+            x,
+            genre_id2label=assets["genre"],
+            style_id2label=assets["style"],
+            artist_id2label=assets["artist"],
+            k=3,
+        )
+        g3 = topk_tuples_to_ui_items(g_t)
+        s3 = topk_tuples_to_ui_items(s_t)
+        a3 = topk_tuples_to_ui_items(a_t)
 
         summary = "\n".join([
             f"**Genre**: {_summarize(g3)}",

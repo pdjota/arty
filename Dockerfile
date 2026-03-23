@@ -39,7 +39,7 @@ else \
   echo \"[train] No last.pt found; training from scratch for ${EPOCHS} epochs\"; \
   python scripts/train_cnn_safe.py --arch \"$ARCH\" --epochs \"$EPOCHS\" --batch-size-primary \"$BATCH_SIZE_PRIMARY\" --batch-size-fallback \"$BATCH_SIZE_FALLBACK\"; \
 fi; \
-python scripts/upload_model_to_hf.py --repo-id \"$MODEL_REPO_ID\" --checkpoint \"checkpoints/$ARCH/best.pt\" --export-labels-dir data/label_maps; \
+python scripts/upload_model_to_hf.py --repo-id \"$MODEL_REPO_ID\" --checkpoint \"checkpoints/$ARCH/best.pt\"; \
 kill $SERVER_PID >/dev/null 2>&1 || true \
 "]
 

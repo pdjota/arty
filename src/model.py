@@ -1,10 +1,72 @@
 """ResNet-50 backbone variants for multi-task classification."""
+from __future__ import annotations
+
+from pathlib import Path
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision.models import ResNet50_Weights, resnet50
 
 
-class ResNet50ThreeHeads(nn.Module):
+def _topk_from_logits(
+    logits: torch.Tensor, id2label: dict[int, str], k: int
+) -> list[tuple[str, float]]:
+    """Map top-k softmax probabilities to label names (batch size 1)."""
+    n = logits.size(-1)
+    k = min(k, n)
+    probs = F.softmax(logits, dim=-1)[0]
+    top = probs.topk(k)
+    return [(id2label[int(i)], float(p)) for i, p in zip(top.indices.tolist(), top.values.tolist())]
+
+
+class _ThreeHeadPredictMixin:
+    """Top-k decoding for genre / style / artist heads (shared by CNN and CNN–RNN)."""
+
+    def predict_topk(
+        self,
+        x: torch.Tensor,
+        *,
+        genre_id2label: dict[int, str],
+        style_id2label: dict[int, str],
+        artist_id2label: dict[int, str],
+        k: int = 3,
+    ) -> tuple[list[tuple[str, float]], list[tuple[str, float]], list[tuple[str, float]]]:
+        self.eval()
+        with torch.no_grad():
+            lg, ls, la = self(x)
+        return (
+            _topk_from_logits(lg, genre_id2label, k),
+            _topk_from_logits(ls, style_id2label, k),
+            _topk_from_logits(la, artist_id2label, k),
+        )
+
+    def predict_topk_from_path(
+        self,
+        path: Path | str,
+        transform: torch.nn.Module,
+        device: torch.device,
+        *,
+        genre_id2label: dict[int, str],
+        style_id2label: dict[int, str],
+        artist_id2label: dict[int, str],
+        k: int = 3,
+    ) -> tuple[list[tuple[str, float]], list[tuple[str, float]], list[tuple[str, float]]]:
+        from PIL import Image
+
+        p = Path(path)
+        img = Image.open(p).convert("RGB")
+        x = transform(img).unsqueeze(0).to(device)
+        return self.predict_topk(
+            x,
+            genre_id2label=genre_id2label,
+            style_id2label=style_id2label,
+            artist_id2label=artist_id2label,
+            k=k,
+        )
+
+
+class ResNet50ThreeHeads(_ThreeHeadPredictMixin, nn.Module):
     """ResNet-50 (ImageNet pretrained), GAP, then three linear heads: genre, style, artist."""
 
     def __init__(
@@ -58,7 +120,7 @@ class ResNet50ThreeHeads(nn.Module):
         )
 
 
-class ResNet50BiLSTMThreeHeads(nn.Module):
+class ResNet50BiLSTMThreeHeads(_ThreeHeadPredictMixin, nn.Module):
     """
     ResNet-50 (ImageNet pretrained) feature map -> column pooling -> BiLSTM -> mean pool -> three heads.
 

@@ -29,6 +29,8 @@ __Note__: The models uploaded to Hugging Face have minimal training below the re
 ## Documentation
 
 - **[`docs/README.md`](docs/README.md)** — index of project docs (checkpoints, Hub model cards, Space layout).
+- **[`docs/setup.md`](docs/setup.md)** — development setup (asdf, Python venv, dependencies).
+- **[`docs/data_preparation.md`](docs/data_preparation.md)** — WikiArt / ArtGAN data layout and building indexes.
 - **[`gradio/README.md`](gradio/README.md)** — running and configuring the Gradio demo.
 
 ## About this project
